@@ -1,0 +1,124 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://placeholderer.dev/schemas/manifest/v1",
+  "title": "Placeholderer Manifest v1",
+  "type": "object",
+  "required": ["schemaVersion", "requests"],
+  "properties": {
+    "schemaVersion": {
+      "type": "integer",
+      "const": 1
+    },
+    "job": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "defaults": {
+          "type": "object",
+          "properties": {
+            "label_enabled": { "type": "boolean", "default": true },
+            "numbering_style": { "type": "string", "enum": ["zero-padded", "plain", "none"], "default": "zero-padded" },
+            "background_color": { "type": "string" },
+            "fill_mode": { "type": "string", "enum": ["repeat", "stretch"], "default": "repeat" }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "requests": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["assets"],
+        "properties": {
+          "name": { "type": "string" },
+          "folders": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "assets": {
+            "type": "array",
+            "items": {
+              "oneOf": [
+                { "$ref": "#/definitions/imageAsset" },
+                { "$ref": "#/definitions/spriteSheetAsset" },
+                { "$ref": "#/definitions/tilesetAsset" },
+                { "$ref": "#/definitions/uiPanelAsset" }
+              ]
+            }
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "definitions": {
+    "baseAsset": {
+      "type": "object",
+      "required": ["kind", "name", "width", "height", "format", "output_path"],
+      "properties": {
+        "kind": { "type": "string" },
+        "name": { "type": "string" },
+        "width": { "type": "integer", "minimum": 1 },
+        "height": { "type": "integer", "minimum": 1 },
+        "format": { "type": "string", "enum": ["png", "jpg", "jpeg", "webp"] },
+        "output_path": { "type": "string" },
+        "label_enabled": { "type": "boolean" },
+        "numbering_style": { "type": "string", "enum": ["zero-padded", "plain", "none"] },
+        "background_color": { "type": "string" },
+        "fill_mode": { "type": "string", "enum": ["repeat", "stretch"] },
+        "label_position": { "type": "string", "enum": ["corners", "center", "top-center", "bottom-center"] },
+        "custom_fill_image": { "type": "string" }
+      }
+    },
+    "imageAsset": {
+      "allOf": [
+        { "$ref": "#/definitions/baseAsset" },
+        { "properties": { "kind": { "const": "image" } } }
+      ]
+    },
+    "spriteSheetAsset": {
+      "allOf": [
+        { "$ref": "#/definitions/baseAsset" },
+        {
+          "properties": {
+            "kind": { "const": "sprite_sheet" },
+            "frame_width": { "type": "integer", "minimum": 1 },
+            "frame_height": { "type": "integer", "minimum": 1 },
+            "rows": { "type": "integer", "minimum": 1 },
+            "columns": { "type": "integer", "minimum": 1 },
+            "show_grid": { "type": "boolean", "default": true }
+          },
+          "required": ["frame_width", "frame_height", "rows", "columns"]
+        }
+      ]
+    },
+    "tilesetAsset": {
+      "allOf": [
+        { "$ref": "#/definitions/baseAsset" },
+        {
+          "properties": {
+            "kind": { "const": "tileset" },
+            "tile_width": { "type": "integer", "minimum": 1 },
+            "tile_height": { "type": "integer", "minimum": 1 }
+          },
+          "required": ["tile_width", "tile_height"]
+        }
+      ]
+    },
+    "uiPanelAsset": {
+      "allOf": [
+        { "$ref": "#/definitions/baseAsset" },
+        {
+          "properties": {
+            "kind": { "const": "ui_panel" },
+            "frame_style": { "type": "string", "enum": ["simple", "beveled", "inset", "outlined"] },
+            "panel_guides": { "type": "boolean", "default": false },
+            "export_panel_metadata": { "type": "boolean", "default": false }
+          }
+        }
+      ]
+    }
+  }
+}

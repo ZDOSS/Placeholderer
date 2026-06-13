@@ -1,0 +1,111 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://placeholderer.dev/schemas/builder-recipe/v1",
+  "title": "Placeholderer Builder Recipe v1",
+  "type": "object",
+  "required": ["canvasMode", "layers"],
+  "properties": {
+    "canvasMode": {
+      "type": "string",
+      "enum": ["compact", "large"]
+    },
+    "width": { "type": "integer", "minimum": 1 },
+    "height": { "type": "integer", "minimum": 1 },
+    "gridSize": { "type": "integer", "minimum": 4, "default": 16 },
+    "snapEnabled": { "type": "boolean", "default": true },
+    "layers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "type", "name", "visible", "locked"],
+        "properties": {
+          "id": { "type": "string" },
+          "type": {
+            "type": "string",
+            "enum": ["rect", "circle", "line", "text", "raster", "filled-shape"]
+          },
+          "name": { "type": "string" },
+          "visible": { "type": "boolean", "default": true },
+          "locked": { "type": "boolean", "default": false },
+          "opacity": { "type": "number", "minimum": 0, "maximum": 1, "default": 1 },
+          "blendMode": {
+            "type": "string",
+            "enum": ["source-over", "multiply", "screen", "overlay", "darken", "lighten"],
+            "default": "source-over"
+          },
+          "x": { "type": "number" },
+          "y": { "type": "number" },
+          "width": { "type": "number" },
+          "height": { "type": "number" },
+          "rotation": { "type": "number", "default": 0 },
+          "fill": {
+            "oneOf": [
+              { "type": "string", "description": "solid color hex" },
+              {
+                "type": "object",
+                "properties": {
+                  "type": { "const": "image" },
+                  "src": { "type": "string" },
+                  "mode": { "enum": ["repeat", "stretch"] }
+                },
+                "required": ["type", "src", "mode"]
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": { "const": "pattern" },
+                  "pattern": { "enum": ["checkerboard", "stripes", "diagonal"] }
+                },
+                "required": ["type", "pattern"]
+              }
+            ]
+          },
+          "stroke": {
+            "type": "object",
+            "properties": {
+              "color": { "type": "string" },
+              "width": { "type": "number" }
+            }
+          },
+          "effects": {
+            "type": "object",
+            "properties": {
+              "shadow": {
+                "type": "object",
+                "properties": {
+                  "blur": { "type": "number" },
+                  "offsetX": { "type": "number" },
+                  "offsetY": { "type": "number" },
+                  "color": { "type": "string" },
+                  "opacity": { "type": "number" }
+                }
+              },
+              "glow": {
+                "type": "object",
+                "properties": {
+                  "blur": { "type": "number" },
+                  "color": { "type": "string" },
+                  "opacity": { "type": "number" }
+                }
+              }
+            }
+          },
+          "text": {
+            "type": "object",
+            "properties": {
+              "content": { "type": "string" },
+              "fontSize": { "type": "number" },
+              "fontFamily": { "type": "string" },
+              "align": { "enum": ["left", "center", "right"] }
+            }
+          },
+          "rasterSrc": { "type": "string" }
+        }
+      }
+    },
+    "history": {
+      "type": "array",
+      "maxItems": 5
+    }
+  }
+}
