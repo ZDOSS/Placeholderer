@@ -2,66 +2,57 @@ import { useState } from 'react';
 
 const engines = ['Godot', 'Unity', 'RPG Maker', 'GameMaker', 'Unreal', 'GDevelop', 'O3DE'];
 
-const templates: Record<string, string> = {
-  Godot: `{
-  "schemaVersion": 1,
-  "job": { "name": "godot_placeholders" },
-  "requests": [{
-    "name": "ui",
-    "assets": [{
-      "kind": "ui_panel",
-      "name": "dialog",
-      "width": 480,
-      "height": 240,
-      "format": "png",
-      "output_path": "res://assets/ui"
-    }]
-  }]
-}`,
-  Unity: `{
-  "schemaVersion": 1,
-  "job": { "name": "unity_placeholders" },
-  "requests": [{
-    "name": "sprites",
-    "assets": [{
-      "kind": "sprite_sheet",
-      "name": "enemy_idle",
-      "width": 256,
-      "height": 128,
-      "format": "png",
-      "output_path": "Assets/Sprites",
-      "frame_width": 64,
-      "frame_height": 64,
-      "rows": 2,
-      "columns": 4
-    }]
-  }]
-}`,
-  'RPG Maker': `{
-  "schemaVersion": 1,
-  "job": { "name": "rpgmaker_placeholders" },
-  "requests": [{
-    "name": "tiles",
-    "assets": [{
-      "kind": "tileset",
-      "name": "world_tiles",
-      "width": 512,
-      "height": 512,
-      "format": "png",
-      "output_path": "img/tilesets",
-      "tile_width": 48,
-      "tile_height": 48
-    }]
-  }]
-}`,
+type AssetType = 'image' | 'sprite_sheet' | 'ui_panel' | 'tileset' | 'mixed';
+
+const assetTypes: AssetType[] = ['image', 'sprite_sheet', 'ui_panel', 'tileset', 'mixed'];
+
+const getTemplate = (engine: string, type: AssetType): string => {
+  const base = {
+    schemaVersion: 1,
+    job: { name: `${engine.toLowerCase()}_placeholders` },
+    requests: [] as any[]
+  };
+
+  if (type === 'mixed') {
+    base.requests = [{
+      name: 'core_assets',
+      assets: [
+        { kind: 'ui_panel', name: 'dialog', width: 480, height: 240, format: 'png', output_path: 'assets/ui' },
+        { kind: 'sprite_sheet', name: 'enemy_idle', width: 256, height: 128, format: 'png', output_path: 'assets/sprites', frame_width: 64, frame_height: 64, rows: 2, columns: 4 }
+      ]
+    }];
+  } else {
+    const asset: any = { kind: type, name: `${type}_example`, width: 256, height: 256, format: 'png', output_path: 'assets' };
+    
+    if (type === 'sprite_sheet') {
+      asset.frame_width = 64;
+      asset.frame_height = 64;
+      asset.rows = 2;
+      asset.columns = 4;
+    }
+    if (type === 'tileset') {
+      asset.tile_width = 32;
+      asset.tile_height = 32;
+    }
+    if (type === 'ui_panel') {
+      asset.panel_guides = true;
+    }
+
+    base.requests = [{ name: 'assets', assets: [asset] }];
+  }
+
+  return JSON.stringify(base, null, 2);
 };
 
 export function Templates() {
-  const [selected, setSelected] = useState('Godot');
+  const [selectedEngine, setSelectedEngine] = useState('Godot');
+  const [selectedType, setSelectedType] = useState<AssetType>('mixed');
   const [copied, setCopied] = useState(false);
 
+  const currentTemplate = getTemplate(selectedEngine, selectedType);
+
   const copy = () => {
-    navigator.clipboard.writeText(templates[selected] || '{}');
+    navigator.clipboard.writeText(currentTemplate);
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
   };
@@ -69,36 +60,82 @@ export function Templates() {
   return (
     <div style={{ padding: '2rem' }}>
       <h2>Templates</h2>
-      
-      <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '1.5rem' }}>
-        {engines.map(e => (
-          <button 
-            key={e}
-            onClick={() => setSelected(e)}
-            style={{ 
-              background: selected === e ? '#2a2a3a' : '#1f1f2e',
-              color: '#fff',
-              border: selected === e ? '1px solid #63b3ed' : '1px solid #444'
-            }}
-          >
-            {e}
-          </button>
-        ))}
+      <p style={{ color: '#94a3b8' }}>Choose an engine, then select the asset type you need.</p>
+
+      {/* Engine Selection */}
+      <div style={{ margin: '1.5rem 0 1rem' }}>
+        <div style={{ fontSize: '0.85rem', color: '#64748b', marginBottom: '0.5rem' }}>Engine</div>
+        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+          {engines.map(engine => (
+            <button
+              key={engine}
+              onClick={() => setSelectedEngine(engine)}
+              style={{
+                padding: '0.5rem 1rem',
+                background: selectedEngine === engine ? '#2563eb' : '#334155',
+                color: '#fff',
+                border: 'none',
+                borderRadius: '6px',
+                cursor: 'pointer'
+              }}
+            >
+              {engine}
+            </button>
+          ))}
+        </div>
       </div>
 
+      {/* Asset Type Selection */}
+      <div style={{ marginBottom: '1.5rem' }}>
+        <div style={{ fontSize: '0.85rem', color: '#64748b', marginBottom: '0.5rem' }}>Asset Type</div>
+        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+          {assetTypes.map(type => (
+            <button
+              key={type}
+              onClick={() => setSelectedType(type)}
+              style={{
+                padding: '0.5rem 1rem',
+                background: selectedType === type ? '#2563eb' : '#334155',
+                color: '#fff',
+                border: 'none',
+                borderRadius: '6px',
+                cursor: 'pointer',
+                textTransform: 'capitalize'
+              }}
+            >
+              {type === 'mixed' ? 'Bundled / Mixed' : type.replace('_', ' ')}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Template Output */}
       <pre style={{ 
-        background: '#111', 
-        color: '#ddd',
+        background: '#0f172a', 
+        color: '#e2e8f0',
         padding: '1.5rem', 
-        borderRadius: 6,
+        borderRadius: '8px',
         fontSize: '0.85rem',
-        overflow: 'auto'
+        border: '1px solid #334155',
+        overflow: 'auto',
+        maxHeight: '420px'
       }}>
-        {templates[selected] || 'Template coming soon for this engine.'}
+        {currentTemplate}
       </pre>
 
-      <button onClick={copy} style={{ marginTop: '1rem' }}>
-        {copied ? 'Copied!' : 'Copy JSON'}
+      <button 
+        onClick={copy} 
+        style={{ 
+          marginTop: '1rem',
+          padding: '0.6rem 1.5rem',
+          background: '#2563eb',
+          color: '#fff',
+          border: 'none',
+          borderRadius: '6px',
+          cursor: 'pointer'
+        }}
+      >
+        {copied ? 'Copied to clipboard!' : 'Copy JSON'}
       </button>
     </div>
   );

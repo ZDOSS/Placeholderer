@@ -108,6 +108,10 @@ function App() {
     }
   };
 
+  const isBuilderView = view === 'builder';
+  const contentMaxWidth = isBuilderView ? '100%' : '1200px';
+  const contentPadding = isBuilderView ? '1rem 2rem' : '2rem';
+
   return (
     <div style={{ 
       minHeight: '100vh', 
@@ -135,7 +139,7 @@ function App() {
         </div>
       </div>
 
-      <div style={{ maxWidth: '1200px', margin: '0 auto', padding: '2rem' }}>
+      <div style={{ maxWidth: contentMaxWidth, margin: '0 auto', padding: contentPadding }}>
         {/* HOME VIEW */}
         {view === 'home' && (
           <div>

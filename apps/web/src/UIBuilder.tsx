@@ -25,12 +25,35 @@ const presets = [
 
 export function UIBuilder() {
   const [layers, setLayers] = useState<Layer[]>([
-    { id: 'bg', type: 'rect', name: 'Background', visible: true, locked: true, x: 0, y: 0, width: 600, height: 400, color: '#2D3748', opacity: 1, blendMode: 'source-over' },
+    { id: 'bg', type: 'rect', name: 'Background', visible: true, locked: true, x: 0, y: 0, width: 1400, height: 900, color: '#2D3748', opacity: 1, blendMode: 'source-over' },
   ]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  const [canvasSize, setCanvasSize] = useState({ width: 1400, height: 900 });
+
+  // Responsive sizing
+  useEffect(() => {
+    const updateCanvasSize = () => {
+      if (containerRef.current) {
+        const container = containerRef.current;
+        const availableWidth = Math.max(container.offsetWidth - 60, 800);
+        const availableHeight = Math.max(window.innerHeight - 220, 600);
+
+        const width = Math.min(availableWidth, 1800);
+        const height = Math.min(availableHeight, Math.floor(width * 0.7));
+
+        setCanvasSize({ width: Math.floor(width), height: Math.floor(height) });
+      }
+    };
+
+    updateCanvasSize();
+    window.addEventListener('resize', updateCanvasSize);
+    return () => window.removeEventListener('resize', updateCanvasSize);
+  }, []);
 
   const selectedLayer = layers.find(l => l.id === selectedId);
 
@@ -39,10 +62,10 @@ export function UIBuilder() {
     if (!canvas) return;
     const ctx = canvas.getContext('2d')!;
     
-    ctx.fillStyle = '#1a1a2e';
+    ctx.fillStyle = '#0f172a';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    ctx.strokeStyle = '#2a2a3a';
+    ctx.strokeStyle = '#1e2937';
     ctx.lineWidth = 1;
     for (let x = 0; x < canvas.width; x += 16) {
       ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height); ctx.stroke();
@@ -59,7 +82,7 @@ export function UIBuilder() {
       if (layer.type === 'rect') {
         ctx.fillStyle = layer.color;
         ctx.fillRect(layer.x, layer.y, layer.width, layer.height);
-        ctx.strokeStyle = '#4A5568';
+        ctx.strokeStyle = '#475569';
         ctx.strokeRect(layer.x, layer.y, layer.width, layer.height);
       }
       if (layer.type === 'text' && layer.text) {
@@ -78,11 +101,11 @@ export function UIBuilder() {
     ctx.globalCompositeOperation = 'source-over';
 
     if (selectedLayer) {
-      ctx.strokeStyle = '#63b3ed';
+      ctx.strokeStyle = '#3b82f6';
       ctx.lineWidth = 2;
       ctx.strokeRect(selectedLayer.x - 2, selectedLayer.y - 2, selectedLayer.width + 4, selectedLayer.height + 4);
     }
-  }, [layers, selectedId]);
+  }, [layers, selectedId, canvasSize]);
 
   const addLayer = (type: 'rect' | 'text' | 'raster', preset?: any) => {
     const newLayer: Layer = {
@@ -106,7 +129,7 @@ export function UIBuilder() {
 
   const startFromScratch = () => {
     setLayers([
-      { id: 'bg', type: 'rect', name: 'Background', visible: true, locked: true, x: 0, y: 0, width: 600, height: 400, color: '#2D3748', opacity: 1, blendMode: 'source-over' },
+      { id: 'bg', type: 'rect', name: 'Background', visible: true, locked: true, x: 0, y: 0, width: canvasSize.width, height: canvasSize.height, color: '#2D3748', opacity: 1, blendMode: 'source-over' },
     ]);
     setSelectedId(null);
   };
@@ -172,16 +195,68 @@ export function UIBuilder() {
     URL.revokeObjectURL(url);
   };
 
-  // Mouse handlers for dragging
+  // Enhanced click handler with modifier keys
+  const handleCanvasClick = (e: React.MouseEvent) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const rect = canvas.getBoundingClientRect();
+    const clickX = e.clientX - rect.left;
+    const clickY = e.clientY - rect.top;
+
+    const hitLayer = [...layers].reverse().find(l => 
+      clickX >= l.x && clickX <= l.x + l.width &&
+      clickY >= l.y && clickY <= l.y + l.height
+    );
+
+    if (!hitLayer) {
+      setSelectedId(null);
+      return;
+    }
+
+    // Control + Click → Send to back
+    if (e.ctrlKey) {
+      const newLayers = layers.filter(l => l.id !== hitLayer.id);
+      setLayers([hitLayer, ...newLayers]);
+      return;
+    }
+
+    // Alt + Click → Send to front
+    if (e.altKey) {
+      const newLayers = layers.filter(l => l.id !== hitLayer.id);
+      setLayers([...newLayers, hitLayer]);
+      return;
+    }
+
+    // Shift + Click on edge → Resize mode (simple implementation)
+    if (e.shiftKey) {
+      const edgeThreshold = 20;
+      const isNearRight = Math.abs(clickX - (hitLayer.x + hitLayer.width)) < edgeThreshold;
+      const isNearBottom = Math.abs(clickY - (hitLayer.y + hitLayer.height)) < edgeThreshold;
+
+      if (isNearRight || isNearBottom) {
+        const newWidth = isNearRight ? Math.max(50, clickX - hitLayer.x) : hitLayer.width;
+        const newHeight = isNearBottom ? Math.max(30, clickY - hitLayer.y) : hitLayer.height;
+        
+        updateLayer(hitLayer.id, { width: newWidth, height: newHeight });
+        setSelectedId(hitLayer.id);
+        return;
+      }
+    }
+
+    // Normal click → Select
+    setSelectedId(hitLayer.id);
+  };
+
+  // Drag handlers
   const handleMouseDown = (e: React.MouseEvent) => {
     const canvas = canvasRef.current;
-    if (!canvas || !selectedLayer) return;
+    if (!canvas || !selectedLayer || e.shiftKey || e.ctrlKey || e.altKey) return;
 
     const rect = canvas.getBoundingClientRect();
     const mouseX = e.clientX - rect.left;
     const mouseY = e.clientY - rect.top;
 
-    // Check if click is inside selected layer
     if (
       mouseX >= selectedLayer.x &&
       mouseX <= selectedLayer.x + selectedLayer.width &&
@@ -189,10 +264,7 @@ export function UIBuilder() {
       mouseY <= selectedLayer.y + selectedLayer.height
     ) {
       setIsDragging(true);
-      setDragOffset({
-        x: mouseX - selectedLayer.x,
-        y: mouseY - selectedLayer.y,
-      });
+      setDragOffset({ x: mouseX - selectedLayer.x, y: mouseY - selectedLayer.y });
     }
   };
 
@@ -206,10 +278,10 @@ export function UIBuilder() {
     const mouseX = e.clientX - rect.left;
     const mouseY = e.clientY - rect.top;
 
-    const newX = mouseX - dragOffset.x;
-    const newY = mouseY - dragOffset.y;
-
-    updateLayer(selectedId, { x: newX, y: newY });
+    updateLayer(selectedId, {
+      x: mouseX - dragOffset.x,
+      y: mouseY - dragOffset.y,
+    });
   };
 
   const handleMouseUp = () => {
@@ -217,109 +289,96 @@ export function UIBuilder() {
   };
 
   return (
-    <div style={{ padding: '1rem', color: '#ddd' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '1rem' }}>
-        <h2>UI Builder</h2>
-        <div>
-          <button onClick={startFromScratch}>Start from Scratch</button>
-          <button onClick={exportPNG}>Export PNG</button>
-          <button onClick={exportRecipe}>Export Recipe</button>
+    <div style={{ padding: '1rem', color: '#e2e8f0', height: 'calc(100vh - 140px)' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+        <h2 style={{ margin: 0 }}>UI Builder</h2>
+        <div style={{ display: 'flex', gap: '0.5rem' }}>
+          <button onClick={startFromScratch} style={{ padding: '0.5rem 1rem', background: '#334155', color: '#fff', border: 'none', borderRadius: '6px' }}>
+            Start from Scratch
+          </button>
+          <button onClick={exportPNG} style={{ padding: '0.5rem 1rem', background: '#2563eb', color: '#fff', border: 'none', borderRadius: '6px' }}>
+            Export PNG
+          </button>
+          <button onClick={exportRecipe} style={{ padding: '0.5rem 1rem', background: '#334155', color: '#fff', border: 'none', borderRadius: '6px' }}>
+            Export Recipe
+          </button>
         </div>
       </div>
 
-      <div style={{ display: 'flex', gap: '2rem' }}>
-        <div>
-          <canvas 
-            ref={canvasRef} 
-            width={600} 
-            height={400}
-            style={{ border: '1px solid #444', cursor: isDragging ? 'grabbing' : 'grab' }}
-            onMouseDown={handleMouseDown}
-            onMouseMove={handleMouseMove}
-            onMouseUp={handleMouseUp}
-            onMouseLeave={handleMouseUp}
-            onClick={(e) => {
-              const rect = e.currentTarget.getBoundingClientRect();
-              const clickX = e.clientX - rect.left;
-              const clickY = e.clientY - rect.top;
-              const hit = [...layers].reverse().find(l => 
-                clickX >= l.x && clickX <= l.x + l.width &&
-                clickY >= l.y && clickY <= l.y + l.height
-              );
-              if (hit && !isDragging) setSelectedId(hit.id);
-            }}
-          />
-          <div style={{ fontSize: '0.75rem', color: '#888', marginTop: '0.5rem' }}>
-            Click to select • Drag selected layer to move
+      <div style={{ display: 'flex', gap: '2rem', height: 'calc(100% - 50px)' }}>
+        <div ref={containerRef} style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'flex-start' }}>
+          <div>
+            <canvas 
+              ref={canvasRef} 
+              width={canvasSize.width} 
+              height={canvasSize.height}
+              style={{ 
+                border: '1px solid #334155', 
+                borderRadius: '8px',
+                cursor: isDragging ? 'grabbing' : 'grab',
+                background: '#0f172a',
+                maxWidth: '100%',
+                height: 'auto',
+                boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.3)'
+              }}
+              onMouseDown={handleMouseDown}
+              onMouseMove={handleMouseMove}
+              onMouseUp={handleMouseUp}
+              onMouseLeave={handleMouseUp}
+              onClick={handleCanvasClick}
+            />
+            <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '0.5rem' }}>
+              Click to select • Drag to move • <strong>Shift+Click</strong> on edge = Resize • <strong>Ctrl+Click</strong> = Send to back • <strong>Alt+Click</strong> = Send to front
+            </div>
           </div>
         </div>
 
-        <div style={{ width: 320 }}>
-          <div style={{ marginBottom: '1rem' }}>
-            <button onClick={() => addLayer('rect')}>+ Rect</button>
-            <button onClick={() => addLayer('text')}>+ Text</button>
-            <button onClick={importRaster}>Import Image</button>
+        <div style={{ width: 320, flexShrink: 0 }}>
+          <div style={{ marginBottom: '1rem', display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+            <button onClick={() => addLayer('rect')} style={{ padding: '0.4rem 0.8rem', background: '#334155', color: '#fff', border: 'none', borderRadius: '6px' }}>+ Rectangle</button>
+            <button onClick={() => addLayer('text')} style={{ padding: '0.4rem 0.8rem', background: '#334155', color: '#fff', border: 'none', borderRadius: '6px' }}>+ Text</button>
+            <button onClick={importRaster} style={{ padding: '0.4rem 0.8rem', background: '#334155', color: '#fff', border: 'none', borderRadius: '6px' }}>Import Image</button>
           </div>
 
-          <div style={{ marginBottom: '0.75rem' }}>
-            <strong>Presets:</strong>
+          <div style={{ marginBottom: '1rem' }}>
+            <div style={{ fontSize: '0.8rem', color: '#64748b', marginBottom: '0.35rem' }}>Presets</div>
             {presets.map(p => (
-              <button key={p.name} onClick={() => addLayer(p.type as any, p)} style={{ marginLeft: '0.25rem' }}>
+              <button key={p.name} onClick={() => addLayer(p.type as any, p)} style={{ marginRight: '0.4rem', marginBottom: '0.4rem', padding: '0.35rem 0.7rem', background: '#1e2937', color: '#fff', border: '1px solid #475569', borderRadius: '4px', fontSize: '0.85rem' }}>
                 {p.name}
               </button>
             ))}
           </div>
 
-          <h4>Layers</h4>
-          {layers.map(layer => (
-            <div 
-              key={layer.id}
-              onClick={() => setSelectedId(layer.id)}
-              style={{ 
-                padding: '0.5rem', 
-                background: selectedId === layer.id ? '#2a2a3a' : '#1f1f2e',
-                marginBottom: '0.25rem',
-                display: 'flex',
-                justifyContent: 'space-between',
-                cursor: 'pointer'
-              }}
-            >
-              <span>{layer.name}</span>
-              <button onClick={(e) => { e.stopPropagation(); deleteLayer(layer.id); }}>×</button>
-            </div>
-          ))}
+          <div>
+            <div style={{ fontSize: '0.8rem', color: '#64748b', marginBottom: '0.5rem' }}>Layers</div>
+            {layers.map(layer => (
+              <div key={layer.id} onClick={() => setSelectedId(layer.id)} style={{ padding: '0.6rem 0.75rem', background: selectedId === layer.id ? '#1e40af' : '#1e2937', marginBottom: '0.25rem', borderRadius: '6px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', fontSize: '0.9rem' }}>
+                <span>{layer.name}</span>
+                <button onClick={(e) => { e.stopPropagation(); deleteLayer(layer.id); }} style={{ background: 'none', border: 'none', color: '#64748b', cursor: 'pointer' }}>×</button>
+              </div>
+            ))}
+          </div>
 
           {selectedLayer && (
-            <div style={{ marginTop: '1.5rem' }}>
-              <h4>Properties</h4>
-              <input 
-                type="color" 
-                value={selectedLayer.color}
-                onChange={(e) => updateLayer(selectedLayer.id, { color: e.target.value })}
-              />
+            <div style={{ marginTop: '1.5rem', padding: '1rem', background: '#1e2937', borderRadius: '8px' }}>
+              <div style={{ fontSize: '0.85rem', color: '#94a3b8', marginBottom: '0.75rem' }}>Properties — {selectedLayer.name}</div>
+              <div style={{ marginBottom: '0.75rem' }}>
+                <label style={{ fontSize: '0.8rem', display: 'block', marginBottom: '0.25rem' }}>Color</label>
+                <input type="color" value={selectedLayer.color} onChange={(e) => updateLayer(selectedLayer.id, { color: e.target.value })} style={{ width: '100%' }} />
+              </div>
               {selectedLayer.type === 'text' && (
-                <input 
-                  type="text"
-                  value={selectedLayer.text || ''}
-                  onChange={(e) => updateLayer(selectedLayer.id, { text: e.target.value })}
-                  style={{ display: 'block', marginTop: '0.5rem' }}
-                />
+                <div style={{ marginBottom: '0.75rem' }}>
+                  <label style={{ fontSize: '0.8rem', display: 'block', marginBottom: '0.25rem' }}>Text</label>
+                  <input type="text" value={selectedLayer.text || ''} onChange={(e) => updateLayer(selectedLayer.id, { text: e.target.value })} style={{ width: '100%', padding: '0.4rem', background: '#0f172a', color: '#fff', border: '1px solid #475569', borderRadius: '4px' }} />
+                </div>
               )}
-              <div style={{ marginTop: '0.75rem' }}>
-                <label>Opacity</label>
-                <input 
-                  type="range" 
-                  min="0" max="1" step="0.05"
-                  value={selectedLayer.opacity ?? 1}
-                  onChange={(e) => updateLayer(selectedLayer.id, { opacity: parseFloat(e.target.value) })}
-                />
+              <div style={{ marginBottom: '0.75rem' }}>
+                <label style={{ fontSize: '0.8rem', display: 'block', marginBottom: '0.25rem' }}>Opacity</label>
+                <input type="range" min="0" max="1" step="0.05" value={selectedLayer.opacity ?? 1} onChange={(e) => updateLayer(selectedLayer.id, { opacity: parseFloat(e.target.value) })} style={{ width: '100%' }} />
               </div>
               <div>
-                <label>Blend Mode</label>
-                <select 
-                  value={selectedLayer.blendMode || 'source-over'}
-                  onChange={(e) => updateLayer(selectedLayer.id, { blendMode: e.target.value })}
-                >
+                <label style={{ fontSize: '0.8rem', display: 'block', marginBottom: '0.25rem' }}>Blend Mode</label>
+                <select value={selectedLayer.blendMode || 'source-over'} onChange={(e) => updateLayer(selectedLayer.id, { blendMode: e.target.value })} style={{ width: '100%', padding: '0.4rem', background: '#0f172a', color: '#fff', border: '1px solid #475569', borderRadius: '4px' }}>
                   <option value="source-over">Normal</option>
                   <option value="multiply">Multiply</option>
                   <option value="screen">Screen</option>
@@ -327,12 +386,8 @@ export function UIBuilder() {
                 </select>
               </div>
               <div style={{ marginTop: '0.75rem' }}>
-                <label>
-                  <input 
-                    type="checkbox"
-                    checked={selectedLayer.visible}
-                    onChange={(e) => updateLayer(selectedLayer.id, { visible: e.target.checked })}
-                  /> Visible
+                <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <input type="checkbox" checked={selectedLayer.visible} onChange={(e) => updateLayer(selectedLayer.id, { visible: e.target.checked })} /> Visible
                 </label>
               </div>
             </div>
