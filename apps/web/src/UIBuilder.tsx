@@ -28,6 +28,8 @@ export function UIBuilder() {
     { id: 'bg', type: 'rect', name: 'Background', visible: true, locked: true, x: 0, y: 0, width: 600, height: 400, color: '#2D3748', opacity: 1, blendMode: 'source-over' },
   ]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   const selectedLayer = layers.find(l => l.id === selectedId);
@@ -170,8 +172,52 @@ export function UIBuilder() {
     URL.revokeObjectURL(url);
   };
 
+  // Mouse handlers for dragging
+  const handleMouseDown = (e: React.MouseEvent) => {
+    const canvas = canvasRef.current;
+    if (!canvas || !selectedLayer) return;
+
+    const rect = canvas.getBoundingClientRect();
+    const mouseX = e.clientX - rect.left;
+    const mouseY = e.clientY - rect.top;
+
+    // Check if click is inside selected layer
+    if (
+      mouseX >= selectedLayer.x &&
+      mouseX <= selectedLayer.x + selectedLayer.width &&
+      mouseY >= selectedLayer.y &&
+      mouseY <= selectedLayer.y + selectedLayer.height
+    ) {
+      setIsDragging(true);
+      setDragOffset({
+        x: mouseX - selectedLayer.x,
+        y: mouseY - selectedLayer.y,
+      });
+    }
+  };
+
+  const handleMouseMove = (e: React.MouseEvent) => {
+    if (!isDragging || !selectedLayer || !selectedId) return;
+
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const rect = canvas.getBoundingClientRect();
+    const mouseX = e.clientX - rect.left;
+    const mouseY = e.clientY - rect.top;
+
+    const newX = mouseX - dragOffset.x;
+    const newY = mouseY - dragOffset.y;
+
+    updateLayer(selectedId, { x: newX, y: newY });
+  };
+
+  const handleMouseUp = () => {
+    setIsDragging(false);
+  };
+
   return (
-    <div style={{ padding: '1rem' }}>
+    <div style={{ padding: '1rem', color: '#ddd' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '1rem' }}>
         <h2>UI Builder</h2>
         <div>
@@ -187,7 +233,11 @@ export function UIBuilder() {
             ref={canvasRef} 
             width={600} 
             height={400}
-            style={{ border: '1px solid #444', cursor: 'crosshair' }}
+            style={{ border: '1px solid #444', cursor: isDragging ? 'grabbing' : 'grab' }}
+            onMouseDown={handleMouseDown}
+            onMouseMove={handleMouseMove}
+            onMouseUp={handleMouseUp}
+            onMouseLeave={handleMouseUp}
             onClick={(e) => {
               const rect = e.currentTarget.getBoundingClientRect();
               const clickX = e.clientX - rect.left;
@@ -196,9 +246,12 @@ export function UIBuilder() {
                 clickX >= l.x && clickX <= l.x + l.width &&
                 clickY >= l.y && clickY <= l.y + l.height
               );
-              setSelectedId(hit?.id || null);
+              if (hit && !isDragging) setSelectedId(hit.id);
             }}
           />
+          <div style={{ fontSize: '0.75rem', color: '#888', marginTop: '0.5rem' }}>
+            Click to select • Drag selected layer to move
+          </div>
         </div>
 
         <div style={{ width: 320 }}>

@@ -77,6 +77,7 @@ export function Templates() {
             onClick={() => setSelected(e)}
             style={{ 
               background: selected === e ? '#2a2a3a' : '#1f1f2e',
+              color: '#fff',
               border: selected === e ? '1px solid #63b3ed' : '1px solid #444'
             }}
           >
@@ -87,6 +88,7 @@ export function Templates() {
 
       <pre style={{ 
         background: '#111', 
+        color: '#ddd',
         padding: '1.5rem', 
         borderRadius: 6,
         fontSize: '0.85rem',
