@@ -2,8 +2,11 @@ import { useState } from 'react';
 import { validateManifest, generateJob } from '@placeholderer/core';
 import { Job, Request, Asset, SafeAdjustment } from './types';
 import { AssetPreview } from './AssetPreview';
+import { UIBuilder } from './UIBuilder';
+import { Templates } from './Templates';
+import { CSVImport } from './CSVImport';
 
-type View = 'home' | 'overview' | 'detail';
+type View = 'home' | 'overview' | 'detail' | 'builder' | 'templates';
 
 function App() {
   const [view, setView] = useState<View>('home');
@@ -12,6 +15,8 @@ function App() {
   const [error, setError] = useState<string | null>(null);
   const [expandedRequests, setExpandedRequests] = useState<Set<number>>(new Set());
   const [isGenerating, setIsGenerating] = useState(false);
+  const [importMode, setImportMode] = useState<'json' | 'csv'>('json');
+  const [lastReport, setLastReport] = useState<any>(null);
 
   const handlePaste = (text: string) => {
     try {
@@ -29,6 +34,11 @@ function App() {
     } catch {
       setError('Failed to parse JSON');
     }
+  };
+
+  const handleCSVImport = (data: any) => {
+    setJob(data);
+    setView('overview');
   };
 
   const toggleRequest = (index: number) => {
@@ -69,6 +79,7 @@ function App() {
     setIsGenerating(true);
     try {
       const result = await generateJob(job);
+      setLastReport(result);
       
       if (result.success && result.zip) {
         const url = URL.createObjectURL(result.zip);
@@ -88,17 +99,38 @@ function App() {
   };
 
   return (
-    <div style={{ padding: '2rem', fontFamily: 'system-ui', maxWidth: '1100px', margin: '0 auto' }}>
-      <h1>Placeholderer</h1>
+    <div style={{ padding: '2rem', fontFamily: 'system-ui', maxWidth: '1200px', margin: '0 auto' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+        <h1>Placeholderer</h1>
+        <div style={{ display: 'flex', gap: '0.5rem' }}>
+          <button onClick={() => setView('home')}>Manifest</button>
+          <button onClick={() => setView('templates')}>Templates</button>
+          <button onClick={() => setView('builder')}>UI Builder</button>
+        </div>
+      </div>
 
       {view === 'home' && (
         <div>
-          <h2>Import Manifest</h2>
-          <textarea
-            placeholder="Paste JSON manifest here..."
-            style={{ width: '100%', height: '300px', fontFamily: 'monospace', marginTop: '1rem' }}
-            onChange={(e) => e.target.value.trim().length > 20 && handlePaste(e.target.value)}
-          />
+          <div style={{ marginBottom: '1rem' }}>
+            <button onClick={() => setImportMode('json')}>JSON</button>
+            <button onClick={() => setImportMode('csv')}>CSV</button>
+          </div>
+
+          {importMode === 'json' && (
+            <>
+              <h2>Import Manifest (JSON)</h2>
+              <textarea
+                placeholder="Paste JSON manifest here..."
+                style={{ width: '100%', height: '300px', fontFamily: 'monospace', marginTop: '1rem' }}
+                onChange={(e) => e.target.value.trim().length > 20 && handlePaste(e.target.value)}
+              />
+            </>
+          )}
+
+          {importMode === 'csv' && (
+            <CSVImport onImport={handleCSVImport} />
+          )}
+
           {error && <pre style={{ color: 'red', background: '#fee', padding: '1rem', marginTop: '1rem' }}>{error}</pre>}
         </div>
       )}
@@ -147,6 +179,13 @@ function App() {
           >
             {isGenerating ? 'Generating...' : 'Generate & Download ZIP'}
           </button>
+
+          {lastReport && (
+            <div style={{ marginTop: '2rem', padding: '1rem', background: '#1f1f2e', borderRadius: 6 }}>
+              <strong>Result:</strong> {lastReport.success ? 'Success' : 'Errors'} 
+              {lastReport.errors?.length > 0 && <div style={{ color: '#fc8181' }}>{lastReport.errors.join(', ')}</div>}
+            </div>
+          )}
         </div>
       )}
 
@@ -210,6 +249,9 @@ function App() {
           </div>
         </div>
       )}
+
+      {view === 'builder' && <UIBuilder />}
+      {view === 'templates' && <Templates />}
     </div>
   );
 }
