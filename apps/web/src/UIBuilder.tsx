@@ -17,6 +17,8 @@ interface Layer {
   blendMode?: string;
 }
 
+type ResizeHandle = 'left' | 'right' | 'top' | 'bottom' | 'corner' | null;
+
 const presets = [
   { name: 'Button', type: 'rect', w: 160, h: 48, color: '#4A5568' },
   { name: 'Panel', type: 'rect', w: 400, h: 240, color: '#2D3748' },
@@ -25,26 +27,30 @@ const presets = [
 
 export function UIBuilder() {
   const [layers, setLayers] = useState<Layer[]>([
-    { id: 'bg', type: 'rect', name: 'Background', visible: true, locked: true, x: 0, y: 0, width: 1400, height: 900, color: '#2D3748', opacity: 1, blendMode: 'source-over' },
+    { id: 'bg', type: 'rect', name: 'Background', visible: true, locked: true, x: 0, y: 0, width: 800, height: 600, color: '#2D3748', opacity: 1, blendMode: 'source-over' },
   ]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
+  const [isResizing, setIsResizing] = useState(false);
+  const [resizeHandle, setResizeHandle] = useState<ResizeHandle>(null);
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  const [canvasSize, setCanvasSize] = useState({ width: 1400, height: 900 });
+  const [canvasSize, setCanvasSize] = useState({ width: 800, height: 600 });
+  const [customWidth, setCustomWidth] = useState(800);
+  const [customHeight, setCustomHeight] = useState(600);
 
   // Responsive sizing
   useEffect(() => {
     const updateCanvasSize = () => {
       if (containerRef.current) {
         const container = containerRef.current;
-        const availableWidth = Math.max(container.offsetWidth - 60, 800);
-        const availableHeight = Math.max(window.innerHeight - 220, 600);
+        const availableWidth = Math.max(container.offsetWidth - 60, 600);
+        const availableHeight = Math.max(window.innerHeight - 220, 500);
 
-        const width = Math.min(availableWidth, 1800);
-        const height = Math.min(availableHeight, Math.floor(width * 0.7));
+        const width = Math.min(availableWidth, 1600);
+        const height = Math.min(availableHeight, Math.floor(width * 0.75));
 
         setCanvasSize({ width: Math.floor(width), height: Math.floor(height) });
       }
@@ -62,9 +68,10 @@ export function UIBuilder() {
     if (!canvas) return;
     const ctx = canvas.getContext('2d')!;
     
-    ctx.fillStyle = '#0f172a';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    // Transparent background for editing view
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
 
+    // Grid
     ctx.strokeStyle = '#1e2937';
     ctx.lineWidth = 1;
     for (let x = 0; x < canvas.width; x += 16) {
@@ -175,17 +182,57 @@ export function UIBuilder() {
     input.click();
   };
 
+  // Export with transparent background
   const exportPNG = () => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const link = document.createElement('a');
-    link.download = 'ui-placeholder.png';
-    link.href = canvas.toDataURL('image/png');
-    link.click();
+    const exportCanvas = document.createElement('canvas');
+    exportCanvas.width = canvasSize.width;
+    exportCanvas.height = canvasSize.height;
+    const ctx = exportCanvas.getContext('2d')!;
+
+    // Transparent background
+    ctx.clearRect(0, 0, exportCanvas.width, exportCanvas.height);
+
+    layers.forEach(layer => {
+      if (!layer.visible) return;
+      ctx.globalAlpha = layer.opacity ?? 1;
+      ctx.globalCompositeOperation = (layer.blendMode as any) || 'source-over';
+
+      if (layer.type === 'rect') {
+        ctx.fillStyle = layer.color;
+        ctx.fillRect(layer.x, layer.y, layer.width, layer.height);
+      }
+      if (layer.type === 'text' && layer.text) {
+        ctx.font = 'bold 24px system-ui';
+        ctx.fillStyle = layer.color;
+        ctx.fillText(layer.text, layer.x, layer.y + 24);
+      }
+      if (layer.type === 'raster' && layer.imageData) {
+        const img = new Image();
+        img.onload = () => {
+          ctx.drawImage(img, layer.x, layer.y, layer.width, layer.height);
+          // Trigger download after image loads
+          const link = document.createElement('a');
+          link.download = 'ui-placeholder.png';
+          link.href = exportCanvas.toDataURL('image/png');
+          link.click();
+        };
+        img.src = layer.imageData;
+        return;
+      }
+    });
+
+    // If no raster layers, download immediately
+    const hasRaster = layers.some(l => l.type === 'raster' && l.visible);
+    if (!hasRaster) {
+      const link = document.createElement('a');
+      link.download = 'ui-placeholder.png';
+      link.href = exportCanvas.toDataURL('image/png');
+      link.click();
+    }
   };
 
   const exportRecipe = () => {
-    const recipe = { canvasMode: 'compact', layers };
+    const recipe = { canvasMode: 'compact', width: canvasSize.width, height: canvasSize.height, layers };
     const blob = new Blob([JSON.stringify(recipe, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -195,7 +242,126 @@ export function UIBuilder() {
     URL.revokeObjectURL(url);
   };
 
-  // Enhanced click handler with modifier keys
+  const setCanvasDimensions = () => {
+    const newWidth = Math.max(100, Math.min(4000, customWidth));
+    const newHeight = Math.max(100, Math.min(4000, customHeight));
+    
+    setCanvasSize({ width: newWidth, height: newHeight });
+    
+    // Scale background layer if it exists
+    if (layers[0]?.id === 'bg') {
+      updateLayer('bg', { width: newWidth, height: newHeight });
+    }
+  };
+
+  // Resize handlers
+  const getResizeHandle = (layer: Layer, mouseX: number, mouseY: number, shiftKey: boolean): ResizeHandle => {
+    if (!shiftKey || !selectedLayer || layer.id !== selectedLayer.id) return null;
+
+    const edgeThreshold = 18;
+    const nearLeft = Math.abs(mouseX - layer.x) < edgeThreshold;
+    const nearRight = Math.abs(mouseX - (layer.x + layer.width)) < edgeThreshold;
+    const nearTop = Math.abs(mouseY - layer.y) < edgeThreshold;
+    const nearBottom = Math.abs(mouseY - (layer.y + layer.height)) < edgeThreshold;
+
+    if (nearLeft && nearTop) return 'corner';
+    if (nearRight && nearBottom) return 'corner';
+    if (nearLeft) return 'left';
+    if (nearRight) return 'right';
+    if (nearTop) return 'top';
+    if (nearBottom) return 'bottom';
+    return null;
+  };
+
+  const handleMouseMove = (e: React.MouseEvent) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const rect = canvas.getBoundingClientRect();
+    const mouseX = e.clientX - rect.left;
+    const mouseY = e.clientY - rect.top;
+
+    if (isResizing && selectedLayer && selectedId && resizeHandle) {
+      let newX = selectedLayer.x;
+      let newY = selectedLayer.y;
+      let newWidth = selectedLayer.width;
+      let newHeight = selectedLayer.height;
+
+      if (resizeHandle === 'left' || resizeHandle === 'corner') {
+        const newRight = selectedLayer.x + selectedLayer.width;
+        newX = Math.min(mouseX, newRight - 40);
+        newWidth = newRight - newX;
+      }
+      if (resizeHandle === 'right' || resizeHandle === 'corner') {
+        newWidth = Math.max(40, mouseX - selectedLayer.x);
+      }
+      if (resizeHandle === 'top' || resizeHandle === 'corner') {
+        const newBottom = selectedLayer.y + selectedLayer.height;
+        newY = Math.min(mouseY, newBottom - 30);
+        newHeight = newBottom - newY;
+      }
+      if (resizeHandle === 'bottom' || resizeHandle === 'corner') {
+        newHeight = Math.max(30, mouseY - selectedLayer.y);
+      }
+
+      updateLayer(selectedId, { x: newX, y: newY, width: newWidth, height: newHeight });
+      return;
+    }
+
+    if (isDragging && selectedLayer && selectedId) {
+      updateLayer(selectedId, {
+        x: mouseX - dragOffset.x,
+        y: mouseY - dragOffset.y,
+      });
+      return;
+    }
+
+    if (selectedLayer && e.shiftKey) {
+      const handle = getResizeHandle(selectedLayer, mouseX, mouseY, true);
+      
+      if (handle === 'left' || handle === 'right') canvas.style.cursor = 'ew-resize';
+      else if (handle === 'top' || handle === 'bottom') canvas.style.cursor = 'ns-resize';
+      else if (handle === 'corner') canvas.style.cursor = 'nwse-resize';
+      else canvas.style.cursor = 'grab';
+    } else {
+      canvas.style.cursor = 'default';
+    }
+  };
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+    const canvas = canvasRef.current;
+    if (!canvas || !selectedLayer) return;
+
+    const rect = canvas.getBoundingClientRect();
+    const mouseX = e.clientX - rect.left;
+    const mouseY = e.clientY - rect.top;
+
+    if (e.shiftKey) {
+      const handle = getResizeHandle(selectedLayer, mouseX, mouseY, true);
+      if (handle) {
+        setIsResizing(true);
+        setResizeHandle(handle);
+        return;
+      }
+    }
+
+    if (
+      mouseX >= selectedLayer.x &&
+      mouseX <= selectedLayer.x + selectedLayer.width &&
+      mouseY >= selectedLayer.y &&
+      mouseY <= selectedLayer.y + selectedLayer.height
+    ) {
+      setIsDragging(true);
+      setDragOffset({ x: mouseX - selectedLayer.x, y: mouseY - selectedLayer.y });
+    }
+  };
+
+  const handleMouseUp = () => {
+    setIsDragging(false);
+    setIsResizing(false);
+    setResizeHandle(null);
+  };
+
   const handleCanvasClick = (e: React.MouseEvent) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -214,78 +380,18 @@ export function UIBuilder() {
       return;
     }
 
-    // Control + Click → Send to back
     if (e.ctrlKey) {
       const newLayers = layers.filter(l => l.id !== hitLayer.id);
       setLayers([hitLayer, ...newLayers]);
       return;
     }
-
-    // Alt + Click → Send to front
     if (e.altKey) {
       const newLayers = layers.filter(l => l.id !== hitLayer.id);
       setLayers([...newLayers, hitLayer]);
       return;
     }
 
-    // Shift + Click on edge → Resize mode (simple implementation)
-    if (e.shiftKey) {
-      const edgeThreshold = 20;
-      const isNearRight = Math.abs(clickX - (hitLayer.x + hitLayer.width)) < edgeThreshold;
-      const isNearBottom = Math.abs(clickY - (hitLayer.y + hitLayer.height)) < edgeThreshold;
-
-      if (isNearRight || isNearBottom) {
-        const newWidth = isNearRight ? Math.max(50, clickX - hitLayer.x) : hitLayer.width;
-        const newHeight = isNearBottom ? Math.max(30, clickY - hitLayer.y) : hitLayer.height;
-        
-        updateLayer(hitLayer.id, { width: newWidth, height: newHeight });
-        setSelectedId(hitLayer.id);
-        return;
-      }
-    }
-
-    // Normal click → Select
     setSelectedId(hitLayer.id);
-  };
-
-  // Drag handlers
-  const handleMouseDown = (e: React.MouseEvent) => {
-    const canvas = canvasRef.current;
-    if (!canvas || !selectedLayer || e.shiftKey || e.ctrlKey || e.altKey) return;
-
-    const rect = canvas.getBoundingClientRect();
-    const mouseX = e.clientX - rect.left;
-    const mouseY = e.clientY - rect.top;
-
-    if (
-      mouseX >= selectedLayer.x &&
-      mouseX <= selectedLayer.x + selectedLayer.width &&
-      mouseY >= selectedLayer.y &&
-      mouseY <= selectedLayer.y + selectedLayer.height
-    ) {
-      setIsDragging(true);
-      setDragOffset({ x: mouseX - selectedLayer.x, y: mouseY - selectedLayer.y });
-    }
-  };
-
-  const handleMouseMove = (e: React.MouseEvent) => {
-    if (!isDragging || !selectedLayer || !selectedId) return;
-
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-
-    const rect = canvas.getBoundingClientRect();
-    const mouseX = e.clientX - rect.left;
-    const mouseY = e.clientY - rect.top;
-
-    updateLayer(selectedId, {
-      x: mouseX - dragOffset.x,
-      y: mouseY - dragOffset.y,
-    });
-  };
-
-  const handleMouseUp = () => {
-    setIsDragging(false);
   };
 
   return (
@@ -305,7 +411,28 @@ export function UIBuilder() {
         </div>
       </div>
 
-      <div style={{ display: 'flex', gap: '2rem', height: 'calc(100% - 50px)' }}>
+      {/* Canvas Size Controls */}
+      <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', marginBottom: '1rem', padding: '0.75rem', background: '#1e2937', borderRadius: '6px' }}>
+        <span style={{ fontSize: '0.9rem', color: '#94a3b8' }}>Canvas Size:</span>
+        <input 
+          type="number" 
+          value={customWidth} 
+          onChange={(e) => setCustomWidth(parseInt(e.target.value) || 100)}
+          style={{ width: '80px', padding: '0.35rem', background: '#0f172a', color: '#fff', border: '1px solid #475569', borderRadius: '4px' }}
+        />
+        <span>×</span>
+        <input 
+          type="number" 
+          value={customHeight} 
+          onChange={(e) => setCustomHeight(parseInt(e.target.value) || 100)}
+          style={{ width: '80px', padding: '0.35rem', background: '#0f172a', color: '#fff', border: '1px solid #475569', borderRadius: '4px' }}
+        />
+        <button onClick={setCanvasDimensions} style={{ padding: '0.35rem 0.8rem', background: '#2563eb', color: '#fff', border: 'none', borderRadius: '4px' }}>
+          Apply
+        </button>
+      </div>
+
+      <div style={{ display: 'flex', gap: '2rem', height: 'calc(100% - 110px)' }}>
         <div ref={containerRef} style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'flex-start' }}>
           <div>
             <canvas 
@@ -315,7 +442,7 @@ export function UIBuilder() {
               style={{ 
                 border: '1px solid #334155', 
                 borderRadius: '8px',
-                cursor: isDragging ? 'grabbing' : 'grab',
+                cursor: 'default',
                 background: '#0f172a',
                 maxWidth: '100%',
                 height: 'auto',
@@ -328,7 +455,7 @@ export function UIBuilder() {
               onClick={handleCanvasClick}
             />
             <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '0.5rem' }}>
-              Click to select • Drag to move • <strong>Shift+Click</strong> on edge = Resize • <strong>Ctrl+Click</strong> = Send to back • <strong>Alt+Click</strong> = Send to front
+              Click to select • Drag to move • <strong>Shift + Drag edge</strong> = Resize • <strong>Ctrl+Click</strong> = Send to back • <strong>Alt+Click</strong> = Send to front
             </div>
           </div>
         </div>
