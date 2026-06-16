@@ -13,9 +13,11 @@
     "build": "pnpm -r build",
     "dev": "pnpm --filter web dev",
     "lint": "pnpm -r lint",
-    "test": "pnpm --filter @placeholderer/core test"
+    "test": "pnpm --filter @placeholderer/core test",
+    "e2e": "playwright test"
   },
   "devDependencies": {
+    "@playwright/test": "^1.61.0",
     "typescript": "^5.5.0"
   }
 }
