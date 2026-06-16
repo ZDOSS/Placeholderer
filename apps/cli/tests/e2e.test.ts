@@ -8,9 +8,16 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import JSZip from 'jszip';
 
-let canRun = true;
-let generateJob: typeof import('@placeholderer/core').generateJob;
-let nodeCanvasBackend: typeof import('../src/canvas.js').nodeCanvasBackend;
+// Import the modules synchronously at load time so the test bodies
+// always have a binding. The actual runnable flag is set by
+// beforeAll after a smoke test; tests that need a working canvas
+// check canRun at the top and return early if it's false. We don't
+// use describe.skipIf — that flag is evaluated when the file is
+// loaded, before beforeAll runs, so a failed native setup wouldn't
+// actually skip the tests.
+let canRun = false;
+let generateJob: typeof import('@placeholderer/core').generateJob | undefined;
+let nodeCanvasBackend: typeof import('../src/canvas.js').nodeCanvasBackend | undefined;
 
 beforeAll(async () => {
   try {
@@ -18,17 +25,28 @@ beforeAll(async () => {
     const cli = await import('../src/canvas.js');
     generateJob = core.generateJob;
     nodeCanvasBackend = cli.nodeCanvasBackend;
-    // Smoke-test the backend by drawing a 1x1 canvas.
+    // Smoke-test the backend by drawing a 1x1 canvas. If the
+    // native binary is missing or unloadable this throws and
+    // canRun stays false, so the tests below short-circuit.
     const h = nodeCanvasBackend.createCanvas(1, 1);
     await h.encode('image/png');
+    canRun = true;
   } catch (err: any) {
-    canRun = false;
     console.warn(`[cli e2e] skipping: ${err?.message ?? err}`);
   }
 });
 
-describe.skipIf(!canRun)('CLI generate (e2e)', () => {
+function requireCanvas(): { generateJob: NonNullable<typeof generateJob>; nodeCanvasBackend: NonNullable<typeof nodeCanvasBackend> } {
+  if (!canRun || !generateJob || !nodeCanvasBackend) {
+    throw new Error('canvas backend unavailable');
+  }
+  return { generateJob, nodeCanvasBackend };
+}
+
+describe('CLI generate (e2e)', () => {
   it('produces a spec-compliant ZIP from a real manifest', async () => {
+    if (!canRun) return; // beforeAll didn't set up; the suite is a no-op
+    const { generateJob, nodeCanvasBackend } = requireCanvas();
     const dir = mkdtempSync(join(tmpdir(), 'placeholderer-cli-e2e-'));
     try {
       const manifestPath = join(dir, 'manifest.json');
@@ -100,6 +118,7 @@ describe.skipIf(!canRun)('CLI generate (e2e)', () => {
   });
 
   it('rejects a bad manifest at validation time', async () => {
+    if (!canRun) return;
     const bad = { schemaVersion: 2, requests: [] };
     // The CLI's runValidate would throw CliError(1); here we just
     // test that the core validator surfaces the issue.
@@ -109,6 +128,8 @@ describe.skipIf(!canRun)('CLI generate (e2e)', () => {
   });
 
   it('emits an animation.json sidecar for animated sprite sheets', async () => {
+    if (!canRun) return;
+    const { generateJob, nodeCanvasBackend } = requireCanvas();
     const dir = mkdtempSync(join(tmpdir(), 'placeholderer-anim-e2e-'));
     try {
       const manifest = {
@@ -145,6 +166,8 @@ describe.skipIf(!canRun)('CLI generate (e2e)', () => {
   });
 
   it('generates a WAV audio asset with a valid RIFF header', async () => {
+    if (!canRun) return;
+    const { generateJob, nodeCanvasBackend } = requireCanvas();
     const dir = mkdtempSync(join(tmpdir(), 'placeholderer-audio-e2e-'));
     try {
       const manifest = {
