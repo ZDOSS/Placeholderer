@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { Asset } from './types';
+import type { Asset } from '@placeholderer/schemas';
 
 interface Props {
   asset: Asset;
