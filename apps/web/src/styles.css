@@ -1,0 +1,70 @@
+/* Theme tokens. The default (no data-theme) is light; the dark theme
+   is opt-in via :root[data-theme="dark"].
+
+   Components reference these via var(--token-name) in their inline
+   styles. The data-theme attribute is toggled by useTheme. */
+
+:root {
+  /* backgrounds */
+  --ph-bg: #f8fafc;
+  --ph-bg-elevated: #ffffff;
+  --ph-bg-inset: #e2e8f0;
+
+  /* text */
+  --ph-text: #0f172a;
+  --ph-text-muted: #475569;
+  --ph-text-dim: #64748b;
+
+  /* borders / dividers */
+  --ph-border: #cbd5e1;
+  --ph-border-strong: #94a3b8;
+
+  /* accents */
+  --ph-accent: #2563eb;
+  --ph-accent-hover: #1d4ed8;
+
+  /* status */
+  --ph-success: #16a34a;
+  --ph-success-bg: #dcfce7;
+  --ph-success-border: #86efac;
+  --ph-error: #b91c1c;
+  --ph-error-bg: #fee2e2;
+  --ph-error-border: #fca5a5;
+  --ph-error-text: #991b1b;
+}
+
+:root[data-theme='dark'] {
+  --ph-bg: #0f172a;
+  --ph-bg-elevated: #1e2937;
+  --ph-bg-inset: #0f172a;
+
+  --ph-text: #e2e8f0;
+  --ph-text-muted: #94a3b8;
+  --ph-text-dim: #64748b;
+
+  --ph-border: #334155;
+  --ph-border-strong: #475569;
+
+  --ph-accent: #2563eb;
+  --ph-accent-hover: #3b82f6;
+
+  --ph-success: #22c55e;
+  --ph-success-bg: #052e16;
+  --ph-success-border: #166534;
+  --ph-error: #f87171;
+  --ph-error-bg: #3f1f1f;
+  --ph-error-border: #7f1d1d;
+  --ph-error-text: #fca5a5;
+}
+
+/* Apply background and text globally so the root element matches. */
+html, body, #root {
+  background: var(--ph-bg);
+  color: var(--ph-text);
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+}

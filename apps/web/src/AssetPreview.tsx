@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import type { Asset } from '@placeholderer/schemas';
+import { colors } from './colors';
 
 interface Props {
   asset: Asset;
@@ -55,11 +56,11 @@ export function AssetPreview({ asset }: Props) {
 
   return (
     <div>
-      <canvas 
-        ref={canvasRef} 
-        style={{ border: '1px solid #444', background: '#1a1a1a' }} 
+      <canvas
+        ref={canvasRef}
+        style={{ border: `1px solid ${colors.borderStrong}`, background: colors.bgInset }}
       />
-      <div style={{ fontSize: '0.8rem', color: '#888', marginTop: '0.5rem' }}>
+      <div style={{ fontSize: '0.8rem', color: colors.textMuted, marginTop: '0.5rem' }}>
         Preview (scaled)
       </div>
     </div>

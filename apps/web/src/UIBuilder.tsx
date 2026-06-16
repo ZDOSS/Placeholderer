@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
+import { colors } from './colors';
 
 interface Layer {
   id: string;
@@ -72,7 +73,7 @@ export function UIBuilder() {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
     // Grid
-    ctx.strokeStyle = '#1e2937';
+    ctx.strokeStyle = colors.bgElevated;
     ctx.lineWidth = 1;
     for (let x = 0; x < canvas.width; x += 16) {
       ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height); ctx.stroke();
@@ -89,7 +90,7 @@ export function UIBuilder() {
       if (layer.type === 'rect') {
         ctx.fillStyle = layer.color;
         ctx.fillRect(layer.x, layer.y, layer.width, layer.height);
-        ctx.strokeStyle = '#475569';
+        ctx.strokeStyle = colors.borderStrong;
         ctx.strokeRect(layer.x, layer.y, layer.width, layer.height);
       }
       if (layer.type === 'text' && layer.text) {
@@ -395,39 +396,39 @@ export function UIBuilder() {
   };
 
   return (
-    <div style={{ padding: '1rem', color: '#e2e8f0', height: 'calc(100vh - 140px)' }}>
+    <div style={{ padding: '1rem', color: colors.text, height: 'calc(100vh - 140px)' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
         <h2 style={{ margin: 0 }}>UI Builder</h2>
         <div style={{ display: 'flex', gap: '0.5rem' }}>
-          <button onClick={startFromScratch} style={{ padding: '0.5rem 1rem', background: '#334155', color: '#fff', border: 'none', borderRadius: '6px' }}>
+          <button onClick={startFromScratch} style={{ padding: '0.5rem 1rem', background: colors.bgInset, color: colors.text, border: 'none', borderRadius: '6px' }}>
             Start from Scratch
           </button>
-          <button onClick={exportPNG} style={{ padding: '0.5rem 1rem', background: '#2563eb', color: '#fff', border: 'none', borderRadius: '6px' }}>
+          <button onClick={exportPNG} style={{ padding: '0.5rem 1rem', background: '#2563eb', color: colors.text, border: 'none', borderRadius: '6px' }}>
             Export PNG
           </button>
-          <button onClick={exportRecipe} style={{ padding: '0.5rem 1rem', background: '#334155', color: '#fff', border: 'none', borderRadius: '6px' }}>
+          <button onClick={exportRecipe} style={{ padding: '0.5rem 1rem', background: colors.bgInset, color: colors.text, border: 'none', borderRadius: '6px' }}>
             Export Recipe
           </button>
         </div>
       </div>
 
       {/* Canvas Size Controls */}
-      <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', marginBottom: '1rem', padding: '0.75rem', background: '#1e2937', borderRadius: '6px' }}>
-        <span style={{ fontSize: '0.9rem', color: '#94a3b8' }}>Canvas Size:</span>
+      <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', marginBottom: '1rem', padding: '0.75rem', background: colors.bgElevated, borderRadius: '6px' }}>
+        <span style={{ fontSize: '0.9rem', color: colors.textMuted }}>Canvas Size:</span>
         <input 
           type="number" 
           value={customWidth} 
           onChange={(e) => setCustomWidth(parseInt(e.target.value) || 100)}
-          style={{ width: '80px', padding: '0.35rem', background: '#0f172a', color: '#fff', border: '1px solid #475569', borderRadius: '4px' }}
+          style={{ width: '80px', padding: '0.35rem', background: colors.bgInset, color: colors.text, border: '1px solid #475569', borderRadius: '4px' }}
         />
         <span>×</span>
         <input 
           type="number" 
           value={customHeight} 
           onChange={(e) => setCustomHeight(parseInt(e.target.value) || 100)}
-          style={{ width: '80px', padding: '0.35rem', background: '#0f172a', color: '#fff', border: '1px solid #475569', borderRadius: '4px' }}
+          style={{ width: '80px', padding: '0.35rem', background: colors.bgInset, color: colors.text, border: '1px solid #475569', borderRadius: '4px' }}
         />
-        <button onClick={setCanvasDimensions} style={{ padding: '0.35rem 0.8rem', background: '#2563eb', color: '#fff', border: 'none', borderRadius: '4px' }}>
+        <button onClick={setCanvasDimensions} style={{ padding: '0.35rem 0.8rem', background: '#2563eb', color: colors.text, border: 'none', borderRadius: '4px' }}>
           Apply
         </button>
       </div>
@@ -443,7 +444,7 @@ export function UIBuilder() {
                 border: '1px solid #334155', 
                 borderRadius: '8px',
                 cursor: 'default',
-                background: '#0f172a',
+                background: colors.bgInset,
                 maxWidth: '100%',
                 height: 'auto',
                 boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.3)'
@@ -454,7 +455,7 @@ export function UIBuilder() {
               onMouseLeave={handleMouseUp}
               onClick={handleCanvasClick}
             />
-            <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '0.5rem' }}>
+            <div style={{ fontSize: '0.75rem', color: colors.textDim, marginTop: '0.5rem' }}>
               Click to select • Drag to move • <strong>Shift + Drag edge</strong> = Resize • <strong>Ctrl+Click</strong> = Send to back • <strong>Alt+Click</strong> = Send to front
             </div>
           </div>
@@ -462,33 +463,33 @@ export function UIBuilder() {
 
         <div style={{ width: 320, flexShrink: 0 }}>
           <div style={{ marginBottom: '1rem', display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-            <button onClick={() => addLayer('rect')} style={{ padding: '0.4rem 0.8rem', background: '#334155', color: '#fff', border: 'none', borderRadius: '6px' }}>+ Rectangle</button>
-            <button onClick={() => addLayer('text')} style={{ padding: '0.4rem 0.8rem', background: '#334155', color: '#fff', border: 'none', borderRadius: '6px' }}>+ Text</button>
-            <button onClick={importRaster} style={{ padding: '0.4rem 0.8rem', background: '#334155', color: '#fff', border: 'none', borderRadius: '6px' }}>Import Image</button>
+            <button onClick={() => addLayer('rect')} style={{ padding: '0.4rem 0.8rem', background: colors.bgInset, color: colors.text, border: 'none', borderRadius: '6px' }}>+ Rectangle</button>
+            <button onClick={() => addLayer('text')} style={{ padding: '0.4rem 0.8rem', background: colors.bgInset, color: colors.text, border: 'none', borderRadius: '6px' }}>+ Text</button>
+            <button onClick={importRaster} style={{ padding: '0.4rem 0.8rem', background: colors.bgInset, color: colors.text, border: 'none', borderRadius: '6px' }}>Import Image</button>
           </div>
 
           <div style={{ marginBottom: '1rem' }}>
-            <div style={{ fontSize: '0.8rem', color: '#64748b', marginBottom: '0.35rem' }}>Presets</div>
+            <div style={{ fontSize: '0.8rem', color: colors.textDim, marginBottom: '0.35rem' }}>Presets</div>
             {presets.map(p => (
-              <button key={p.name} onClick={() => addLayer(p.type as any, p)} style={{ marginRight: '0.4rem', marginBottom: '0.4rem', padding: '0.35rem 0.7rem', background: '#1e2937', color: '#fff', border: '1px solid #475569', borderRadius: '4px', fontSize: '0.85rem' }}>
+              <button key={p.name} onClick={() => addLayer(p.type as any, p)} style={{ marginRight: '0.4rem', marginBottom: '0.4rem', padding: '0.35rem 0.7rem', background: colors.bgElevated, color: colors.text, border: '1px solid #475569', borderRadius: '4px', fontSize: '0.85rem' }}>
                 {p.name}
               </button>
             ))}
           </div>
 
           <div>
-            <div style={{ fontSize: '0.8rem', color: '#64748b', marginBottom: '0.5rem' }}>Layers</div>
+            <div style={{ fontSize: '0.8rem', color: colors.textDim, marginBottom: '0.5rem' }}>Layers</div>
             {layers.map(layer => (
-              <div key={layer.id} onClick={() => setSelectedId(layer.id)} style={{ padding: '0.6rem 0.75rem', background: selectedId === layer.id ? '#1e40af' : '#1e2937', marginBottom: '0.25rem', borderRadius: '6px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', fontSize: '0.9rem' }}>
+              <div key={layer.id} onClick={() => setSelectedId(layer.id)} style={{ padding: '0.6rem 0.75rem', background: selectedId === layer.id ? colors.accent : colors.bgElevated, marginBottom: '0.25rem', borderRadius: '6px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', fontSize: '0.9rem' }}>
                 <span>{layer.name}</span>
-                <button onClick={(e) => { e.stopPropagation(); deleteLayer(layer.id); }} style={{ background: 'none', border: 'none', color: '#64748b', cursor: 'pointer' }}>×</button>
+                <button onClick={(e) => { e.stopPropagation(); deleteLayer(layer.id); }} style={{ background: 'none', border: 'none', color: colors.textDim, cursor: 'pointer' }}>×</button>
               </div>
             ))}
           </div>
 
           {selectedLayer && (
-            <div style={{ marginTop: '1.5rem', padding: '1rem', background: '#1e2937', borderRadius: '8px' }}>
-              <div style={{ fontSize: '0.85rem', color: '#94a3b8', marginBottom: '0.75rem' }}>Properties — {selectedLayer.name}</div>
+            <div style={{ marginTop: '1.5rem', padding: '1rem', background: colors.bgElevated, borderRadius: '8px' }}>
+              <div style={{ fontSize: '0.85rem', color: colors.textMuted, marginBottom: '0.75rem' }}>Properties — {selectedLayer.name}</div>
               <div style={{ marginBottom: '0.75rem' }}>
                 <label style={{ fontSize: '0.8rem', display: 'block', marginBottom: '0.25rem' }}>Color</label>
                 <input type="color" value={selectedLayer.color} onChange={(e) => updateLayer(selectedLayer.id, { color: e.target.value })} style={{ width: '100%' }} />
@@ -496,7 +497,7 @@ export function UIBuilder() {
               {selectedLayer.type === 'text' && (
                 <div style={{ marginBottom: '0.75rem' }}>
                   <label style={{ fontSize: '0.8rem', display: 'block', marginBottom: '0.25rem' }}>Text</label>
-                  <input type="text" value={selectedLayer.text || ''} onChange={(e) => updateLayer(selectedLayer.id, { text: e.target.value })} style={{ width: '100%', padding: '0.4rem', background: '#0f172a', color: '#fff', border: '1px solid #475569', borderRadius: '4px' }} />
+                  <input type="text" value={selectedLayer.text || ''} onChange={(e) => updateLayer(selectedLayer.id, { text: e.target.value })} style={{ width: '100%', padding: '0.4rem', background: colors.bgInset, color: colors.text, border: '1px solid #475569', borderRadius: '4px' }} />
                 </div>
               )}
               <div style={{ marginBottom: '0.75rem' }}>
@@ -505,7 +506,7 @@ export function UIBuilder() {
               </div>
               <div>
                 <label style={{ fontSize: '0.8rem', display: 'block', marginBottom: '0.25rem' }}>Blend Mode</label>
-                <select value={selectedLayer.blendMode || 'source-over'} onChange={(e) => updateLayer(selectedLayer.id, { blendMode: e.target.value })} style={{ width: '100%', padding: '0.4rem', background: '#0f172a', color: '#fff', border: '1px solid #475569', borderRadius: '4px' }}>
+                <select value={selectedLayer.blendMode || 'source-over'} onChange={(e) => updateLayer(selectedLayer.id, { blendMode: e.target.value })} style={{ width: '100%', padding: '0.4rem', background: colors.bgInset, color: colors.text, border: '1px solid #475569', borderRadius: '4px' }}>
                   <option value="source-over">Normal</option>
                   <option value="multiply">Multiply</option>
                   <option value="screen">Screen</option>

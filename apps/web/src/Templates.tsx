@@ -1,6 +1,6 @@
 import { useState } from 'react';
+import { colors } from './colors';
 import {
-  ALL_ENGINES,
   V1_ENGINES,
   V1_1_ENGINES,
   TEMPLATE_TYPES,
@@ -35,7 +35,7 @@ export function Templates() {
   return (
     <div style={{ padding: '2rem' }}>
       <h2>Templates</h2>
-      <p style={{ color: '#94a3b8' }}>
+      <p style={{ color: colors.textMuted }}>
         Choose an engine, then select the asset type. Each engine produces
         starter content with its preferred folder root, naming convention,
         and sizing notes.
@@ -43,7 +43,7 @@ export function Templates() {
 
       {/* Engine Selection — v1 first, then v1.1 */}
       <div style={{ margin: '1.5rem 0 1rem' }}>
-        <div style={{ fontSize: '0.85rem', color: '#64748b', marginBottom: '0.5rem' }}>Engine (v1)</div>
+        <div style={{ fontSize: '0.85rem', color: colors.textDim, marginBottom: '0.5rem' }}>Engine (v1)</div>
         <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
           {V1_ENGINES.map(engine => (
             <button
@@ -51,8 +51,8 @@ export function Templates() {
               onClick={() => setSelectedEngine(engine)}
               style={{
                 padding: '0.5rem 1rem',
-                background: selectedEngine === engine ? '#2563eb' : '#334155',
-                color: '#fff',
+                background: selectedEngine === engine ? colors.accent : colors.bgInset,
+                color: colors.text,
                 border: 'none',
                 borderRadius: '6px',
                 cursor: 'pointer'
@@ -62,7 +62,7 @@ export function Templates() {
             </button>
           ))}
         </div>
-        <div style={{ fontSize: '0.85rem', color: '#64748b', margin: '0.75rem 0 0.5rem' }}>Engine (v1.1)</div>
+        <div style={{ fontSize: '0.85rem', color: colors.textDim, margin: '0.75rem 0 0.5rem' }}>Engine (v1.1)</div>
         <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
           {V1_1_ENGINES.map(engine => (
             <button
@@ -70,8 +70,8 @@ export function Templates() {
               onClick={() => setSelectedEngine(engine)}
               style={{
                 padding: '0.5rem 1rem',
-                background: selectedEngine === engine ? '#2563eb' : '#334155',
-                color: '#fff',
+                background: selectedEngine === engine ? colors.accent : colors.bgInset,
+                color: colors.text,
                 border: 'none',
                 borderRadius: '6px',
                 cursor: 'pointer'
@@ -88,13 +88,13 @@ export function Templates() {
         <div style={{
           margin: '1rem 0',
           padding: '0.75rem 1rem',
-          background: '#1e2937',
-          border: '1px solid #334155',
+          background: colors.bgElevated,
+          border: '1px solid ${colors.border}',
           borderRadius: '6px',
           fontSize: '0.85rem',
-          color: '#cbd5e1',
+          color: colors.textMuted,
         }}>
-          <div><strong>Default path:</strong> <code style={{ color: '#93c5fd' }}>{guide.defaultPath}</code></div>
+          <div><strong>Default path:</strong> <code style={{ color: colors.accent }}>{guide.defaultPath}</code></div>
           <div><strong>Naming:</strong> {guide.namingConvention}</div>
           <div><strong>Sizing:</strong> {guide.sizingNotes}</div>
         </div>
@@ -102,7 +102,7 @@ export function Templates() {
 
       {/* Asset Type Selection */}
       <div style={{ marginBottom: '1.5rem' }}>
-        <div style={{ fontSize: '0.85rem', color: '#64748b', marginBottom: '0.5rem' }}>Asset Type</div>
+        <div style={{ fontSize: '0.85rem', color: colors.textDim, marginBottom: '0.5rem' }}>Asset Type</div>
         <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
           {TEMPLATE_TYPES.map(type => (
             <button
@@ -110,8 +110,8 @@ export function Templates() {
               onClick={() => setSelectedType(type)}
               style={{
                 padding: '0.5rem 1rem',
-                background: selectedType === type ? '#2563eb' : '#334155',
-                color: '#fff',
+                background: selectedType === type ? colors.accent : colors.bgInset,
+                color: colors.text,
                 border: 'none',
                 borderRadius: '6px',
                 cursor: 'pointer',
@@ -126,12 +126,12 @@ export function Templates() {
 
       {/* Template Output */}
       <pre style={{
-        background: '#0f172a',
-        color: '#e2e8f0',
+        background: colors.bgInset,
+        color: colors.text,
         padding: '1.5rem',
         borderRadius: '8px',
         fontSize: '0.85rem',
-        border: '1px solid #334155',
+        border: '1px solid ${colors.border}',
         overflow: 'auto',
         maxHeight: '420px'
       }}>
@@ -143,8 +143,8 @@ export function Templates() {
         style={{
           marginTop: '1rem',
           padding: '0.6rem 1.5rem',
-          background: '#2563eb',
-          color: '#fff',
+          background: colors.accent,
+          color: colors.text,
           border: 'none',
           borderRadius: '6px',
           cursor: 'pointer'
