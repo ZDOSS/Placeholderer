@@ -7,6 +7,7 @@ import { Templates } from './Templates';
 import { CSVImport } from './CSVImport';
 import { useTheme } from './useTheme';
 import { colors } from './colors';
+import { readZipEntry } from './zipParser';
 
 // Browser canvas backend: wraps OffscreenCanvas so the shared core
 // can run without knowing it's in a browser.
@@ -117,9 +118,17 @@ function App() {
         URL.revokeObjectURL(url);
 
         // Pull the embedded manifest report out of the ZIP so the
-        // user can see what was produced. JSZip isn't bundled in the
-        // web app, so we decode the central directory by hand.
-        await loadManifestReport(bytes);
+        // user can see what was produced. The decoder is a small
+        // standalone helper in ./zipParser.
+        try {
+          const entry = readZipEntry(bytes, '_placeholderer/manifest-report.json');
+          if (entry) {
+            const text = new TextDecoder().decode(entry.bytes);
+            setManifestReport(JSON.parse(text) as GenerationReport);
+          }
+        } catch {
+          // Manifest is best-effort.
+        }
       } else {
         setError(result.errors.join('\n'));
       }
@@ -127,54 +136,6 @@ function App() {
       setError(e.message);
     } finally {
       setIsGenerating(false);
-    }
-  };
-
-  /** Decode the manifest-report.json embedded in the generated ZIP
-   *  without pulling in a full ZIP library on the web side. We only
-   *  support the layout that @placeholderer/core's generateJob
-   *  produces: STORE method, single descriptor, uncompressed entry. */
-  const loadManifestReport = async (bytes: Uint8Array): Promise<void> => {
-    try {
-      // End of central directory record is at the very end.
-      const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-      const eocdSig = view.getUint32(bytes.length - 22, true);
-      if (eocdSig !== 0x06054b50) return;
-      const totalEntries = view.getUint16(bytes.length - 10, true);
-      const cdSize = view.getUint32(bytes.length - 12, true);
-      const cdOffset = view.getUint32(bytes.length - 16, true);
-      const target = '_placeholderer/manifest-report.json';
-      let entryOffset = cdOffset;
-      for (let i = 0; i < totalEntries; i++) {
-        const sig = view.getUint32(entryOffset, true);
-        if (sig !== 0x02014b50) return;
-        const nameLen = view.getUint16(entryOffset + 28, true);
-        const extraLen = view.getUint16(entryOffset + 30, true);
-        const commentLen = view.getUint16(entryOffset + 32, true);
-        const localHeaderOffset = view.getUint32(entryOffset + 42, true);
-        const nameStart = entryOffset + 46;
-        const name = new TextDecoder().decode(bytes.subarray(nameStart, nameStart + nameLen));
-        if (name === target) {
-          // Local file header is 30 bytes + name + extra.
-          const localNameLen = view.getUint16(localHeaderOffset + 26, true);
-          const localExtraLen = view.getUint16(localHeaderOffset + 28, true);
-          const dataStart = localHeaderOffset + 30 + localNameLen + localExtraLen;
-          const compMethod = view.getUint16(localHeaderOffset + 8, true);
-          const compSize = view.getUint32(localHeaderOffset + 18, true);
-          if (compMethod === 0) {
-            const text = new TextDecoder().decode(bytes.subarray(dataStart, dataStart + compSize));
-            setManifestReport(JSON.parse(text) as GenerationReport);
-            return;
-          }
-        }
-        // Advance to the next central-directory entry. Each entry is
-        // 46 bytes plus the variable-length name, extra, and comment
-        // fields, not a flat 46 bytes.
-        entryOffset += 46 + nameLen + extraLen + commentLen;
-      }
-    } catch {
-      // Manifest is best-effort. A failure here doesn't block the
-      // download or error path.
     }
   };
 

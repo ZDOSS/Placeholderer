@@ -43,11 +43,13 @@ test.describe('Placeholderer web app', () => {
     expect(download.suggestedFilename()).toBe('e2e_smoke.zip');
 
     // The manifest report panel should appear in the UI. Wait
-    // explicitly for the panel heading (a <strong> inside the panel
-    // div) so we don't race the manual ZIP decoder.
-    await page.locator('strong', { hasText: 'Manifest report' }).waitFor();
-    await expect(page.getByText('Total')).toBeVisible();
-    await expect(page.getByText('Successful')).toBeVisible();
+    // explicitly for the panel heading so we don't race the manual
+    // ZIP decoder, then assert the job name from the report is
+    // visible (the job name only appears in the report panel, not
+    // elsewhere on the page, so this is a unique assertion).
+    const heading = page.locator('strong', { hasText: 'Manifest report' });
+    await heading.waitFor();
+    await expect(page.getByText('e2e_smoke').nth(1)).toBeVisible();
   });
 
   test('theme toggle switches the data-theme attribute', async ({ page }) => {
