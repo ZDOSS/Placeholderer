@@ -709,9 +709,60 @@ function PropertiesPanel({ layer, onUpdate, colors }: PropertiesPanelProps) {
         <input type="number" value={layer.rotation ?? 0} onChange={(e) => onUpdate({ rotation: parseFloat(e.target.value) || 0 })} style={inputStyle(colors)} />
       </Field>
 
-      <Field label="Fill color">
-        <input type="color" value={fillColor} onChange={(e) => onUpdate({ fill: e.target.value })} style={{ ...inputStyle(colors), padding: 0, height: 28 }} />
+      <Field label="Fill mode">
+        <select
+          value={typeof layer.fill === 'string' || !layer.fill ? 'solid' : (layer.fill as any).type ?? 'solid'}
+          onChange={(e) => {
+            const mode = e.target.value;
+            if (mode === 'solid') onUpdate({ fill: '#4A5568' });
+            else if (mode === 'pattern') onUpdate({ fill: { type: 'pattern', pattern: 'checkerboard' } });
+            else if (mode === 'image') onUpdate({ fill: { type: 'image', src: '', mode: 'repeat' } });
+          }}
+          style={inputStyle(colors)}
+        >
+          <option value="solid">Solid</option>
+          <option value="pattern">Pattern</option>
+          <option value="image">Image</option>
+        </select>
       </Field>
+
+      {typeof layer.fill === 'object' && layer.fill && (layer.fill as any).type === 'pattern' && (
+        <Field label="Pattern">
+          <select
+            value={(layer.fill as any).pattern}
+            onChange={(e) => onUpdate({ fill: { type: 'pattern', pattern: e.target.value as any } })}
+            style={inputStyle(colors)}
+          >
+            <option value="checkerboard">Checkerboard</option>
+            <option value="stripes">Stripes</option>
+            <option value="diagonal">Diagonal</option>
+          </select>
+        </Field>
+      )}
+
+      {typeof layer.fill === 'object' && layer.fill && (layer.fill as any).type === 'image' && (
+        <>
+          <Field label="Image src" wide>
+            <input value={(layer.fill as any).src ?? ''} onChange={(e) => onUpdate({ fill: { type: 'image', src: e.target.value, mode: (layer.fill as any).mode ?? 'repeat' } })} style={inputStyle(colors)} />
+          </Field>
+          <Field label="Mode">
+            <select
+              value={(layer.fill as any).mode ?? 'repeat'}
+              onChange={(e) => onUpdate({ fill: { type: 'image', src: (layer.fill as any).src ?? '', mode: e.target.value as any } })}
+              style={inputStyle(colors)}
+            >
+              <option value="repeat">Repeat</option>
+              <option value="stretch">Stretch</option>
+            </select>
+          </Field>
+        </>
+      )}
+
+      {(typeof layer.fill === 'string' || !layer.fill) && (
+        <Field label="Fill color">
+          <input type="color" value={fillColor} onChange={(e) => onUpdate({ fill: e.target.value })} style={{ ...inputStyle(colors), padding: 0, height: 28 }} />
+        </Field>
+      )}
 
       <Field label="Stroke color">
         <input type="color" value={strokeColor || '#000000'} onChange={(e) => onUpdate({ stroke: { ...(layer.stroke ?? {}), color: e.target.value } })} style={{ ...inputStyle(colors), padding: 0, height: 28 }} />
@@ -723,6 +774,24 @@ function PropertiesPanel({ layer, onUpdate, colors }: PropertiesPanelProps) {
 
       <Field label="Shadow blur">
         <input type="number" value={shadowBlur} min={0} onChange={(e) => onUpdate({ effects: { ...(layer.effects ?? {}), shadow: { ...(layer.effects?.shadow ?? {}), blur: parseInt(e.target.value) || 0, color: shadowColor || 'rgba(0,0,0,0.5)' } } })} style={inputStyle(colors)} />
+      </Field>
+
+      <Field label="Glow blur">
+        <input
+          type="number"
+          value={layer.effects?.glow?.blur ?? ''}
+          min={0}
+          onChange={(e) => {
+            const v = parseInt(e.target.value) || 0;
+            if (v === 0) {
+              const { glow, ...rest } = layer.effects ?? {};
+              onUpdate({ effects: Object.keys(rest).length ? rest : undefined });
+            } else {
+              onUpdate({ effects: { ...(layer.effects ?? {}), glow: { blur: v, color: layer.effects?.glow?.color ?? 'rgba(255,255,255,0.6)' } } });
+            }
+          }}
+          style={inputStyle(colors)}
+        />
       </Field>
 
       <Field label="Opacity">

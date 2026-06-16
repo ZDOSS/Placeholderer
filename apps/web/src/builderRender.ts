@@ -10,6 +10,7 @@ import type {
   StrokeSpec,
   ShadowEffect,
   GlowEffect,
+  PatternKind,
 } from '@placeholderer/schemas';
 
 export interface BuilderCtx {
@@ -18,12 +19,90 @@ export interface BuilderCtx {
   height: number;
 }
 
-/** Resolve a FillSpec to a string color, falling back to a default. */
+const PATTERN_TILE = 16;
+
+/** Build a tile-sized pattern of the given kind using an
+ *  OffscreenCanvas as the source. Returns null on environments
+ *  without OffscreenCanvas (e.g. Node without a polyfill). */
+function buildPattern(ctx: CanvasRenderingContext2D, kind: PatternKind, color: string): CanvasPattern | null {
+  if (typeof OffscreenCanvas === 'undefined') return null;
+  try {
+    const source = new OffscreenCanvas(PATTERN_TILE, PATTERN_TILE);
+    const sctx = source.getContext('2d');
+    if (!sctx) return null;
+    sctx.fillStyle = '#ffffff';
+    sctx.fillRect(0, 0, PATTERN_TILE, PATTERN_TILE);
+    sctx.fillStyle = color;
+    sctx.strokeStyle = color;
+    sctx.lineWidth = 1;
+    if (kind === 'checkerboard') {
+      sctx.fillRect(0, 0, PATTERN_TILE / 2, PATTERN_TILE / 2);
+      sctx.fillRect(PATTERN_TILE / 2, PATTERN_TILE / 2, PATTERN_TILE / 2, PATTERN_TILE / 2);
+    } else if (kind === 'stripes') {
+      for (let y = 0; y < PATTERN_TILE; y += 4) sctx.fillRect(0, y, PATTERN_TILE, 2);
+    } else if (kind === 'diagonal') {
+      for (let i = -PATTERN_TILE; i < PATTERN_TILE * 2; i += 4) {
+        sctx.beginPath();
+        sctx.moveTo(i, PATTERN_TILE);
+        sctx.lineTo(i + PATTERN_TILE, 0);
+        sctx.stroke();
+      }
+    }
+    return ctx.createPattern(source, 'repeat');
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+/** Resolve a FillSpec to a usable fill. Returns the string for solid
+ *  colors, a CanvasPattern for pattern fills (built from a tile
+ *  OffscreenCanvas), or a string color for image fills (the image
+ *  itself is loaded via preloadFillImages). Pattern creation can fail
+ *  on environments without OffscreenCanvas; the fallback color is
+ *  returned in that case. */
+export function resolveFill(fill: FillSpec | undefined, fallback: string, ctx: CanvasRenderingContext2D): string | CanvasPattern {
+  if (!fill) return fallback;
+  if (typeof fill === 'string') return fill;
+  if (fill.type === 'pattern') {
+    return buildPattern(ctx, fill.pattern, fallback) ?? fallback;
+  }
+  // Image fills: the image is preloaded separately; the actual draw
+  // path uses a cached HTMLImageElement. Return the fallback color
+  // here so ctx.fillStyle has something assignable; the caller
+  // uses drawImage with the cached image over the top.
+  return fallback;
+}
+
+/** Preload every image fill referenced by the layer stack. Returns
+ *  a promise that resolves once every image is loaded. */
+export function preloadFillImages(layers: Layer[]): Promise<void> {
+  const sources = new Set<string>();
+  for (const l of layers) {
+    const fill: any = l.fill;
+    if (fill && typeof fill === 'object' && fill.type === 'image' && fill.src) {
+      sources.add(fill.src);
+    }
+  }
+  const promises: Promise<void>[] = [];
+  for (const src of sources) {
+    if (rasterCache.has(src)) continue;
+    promises.push(new Promise<void>((resolve) => {
+      const img = new Image();
+      img.onload = () => { rasterCache.set(src, img); resolve(); };
+      img.onerror = () => resolve();
+      img.src = src;
+    }));
+  }
+  return Promise.all(promises).then(() => undefined);
+}
+
+/** Resolve a FillSpec to a string color, falling back to a default.
+ *  Used for layer fill inputs that don't need pattern/image support
+ *  (text color, shadow color, etc.). */
 export function fillToColor(fill: FillSpec | undefined, fallback: string): string {
   if (!fill) return fallback;
   if (typeof fill === 'string') return fill;
-  // Image and pattern fills are not yet implemented in the v1 render
-  // path; fall back to the default color.
   return fallback;
 }
 
@@ -113,8 +192,10 @@ export function renderLayer(dc: BuilderCtx, layer: Layer): void {
 }
 
 function drawRect(ctx: CanvasRenderingContext2D, layer: any, x: number, y: number, w: number, h: number): void {
-  ctx.fillStyle = fillToColor(layer.fill, '#4A5568');
+  const fill = resolveFill(layer.fill, '#4A5568', ctx);
+  ctx.fillStyle = fill;
   ctx.fillRect(x, y, w, h);
+  drawImageFillOverlay(ctx, layer, x, y, w, h);
   const stroke = strokeToStroke(layer.stroke);
   if (stroke) {
     ctx.strokeStyle = stroke.color;
@@ -123,13 +204,35 @@ function drawRect(ctx: CanvasRenderingContext2D, layer: any, x: number, y: numbe
   }
 }
 
+function drawImageFillOverlay(ctx: CanvasRenderingContext2D, layer: any, x: number, y: number, w: number, h: number): void {
+  const fill: any = layer.fill;
+  if (!fill || typeof fill === 'string' || fill.type !== 'image' || !fill.src) return;
+  const img = rasterCache.get(fill.src);
+  if (!img) return;
+  if (fill.mode === 'stretch') {
+    ctx.drawImage(img, x, y, w, h);
+  } else {
+    // repeat (default for image fills)
+    const pat = ctx.createPattern(img, 'repeat');
+    if (pat) {
+      ctx.save();
+      ctx.fillStyle = pat;
+      ctx.beginPath();
+      ctx.rect(x, y, w, h);
+      ctx.fill();
+      ctx.restore();
+    }
+  }
+}
+
 function drawCircle(ctx: CanvasRenderingContext2D, layer: any, cx: number, cy: number, w: number, h: number): void {
   const rx = w / 2;
   const ry = h / 2;
   ctx.beginPath();
   ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
-  ctx.fillStyle = fillToColor(layer.fill, '#4A5568');
+  ctx.fillStyle = resolveFill(layer.fill, '#4A5568', ctx);
   ctx.fill();
+  drawImageFillOverlay(ctx, layer, cx - rx, cy - ry, w, h);
   const stroke = strokeToStroke(layer.stroke);
   if (stroke) {
     ctx.strokeStyle = stroke.color;
@@ -160,18 +263,20 @@ function drawText(ctx: CanvasRenderingContext2D, layer: any, x: number, y: numbe
   ctx.fillText(content, textX, y + fontSize);
 }
 
-// Cache for raster sources so the on-screen render and the export
-// path can both await a fully-loaded image before drawing.
+// Cache for raster/image-fill sources so the on-screen render and the
+// export path can both await a fully-loaded image before drawing.
 const rasterCache = new Map<string, HTMLImageElement>();
 
-/** Preload all raster sources referenced by the layer stack.
- *  Returns a promise that resolves once every image is loaded (or has
- *  failed). The export path awaits this so PNG/JPG outputs include
- *  the imported raster layers instead of silently omitting them. */
+/** Preload all raster sources referenced by the layer stack (raster
+ *  layers and image fills). The export path awaits this so PNG/JPG
+ *  outputs include the imported raster layers and image fills
+ *  instead of silently omitting them. */
 export function preloadRasterImages(layers: Layer[]): Promise<void> {
   const sources = new Set<string>();
   for (const l of layers) {
     if (l.type === 'raster' && l.rasterSrc) sources.add(l.rasterSrc);
+    const fill: any = l.fill;
+    if (fill && typeof fill === 'object' && fill.type === 'image' && fill.src) sources.add(fill.src);
   }
   const promises: Promise<void>[] = [];
   for (const src of sources) {
@@ -180,7 +285,7 @@ export function preloadRasterImages(layers: Layer[]): Promise<void> {
     promises.push(new Promise<void>((resolve) => {
       const img = new Image();
       img.onload = () => { rasterCache.set(src, img); resolve(); };
-      img.onerror = () => { resolve(); };
+      img.onerror = () => resolve();
       img.src = src;
     }));
   }
