@@ -71,6 +71,9 @@ export interface SpriteSheetAsset extends BaseAsset {
   rows: number;
   columns: number;
   show_grid?: boolean;
+  /** Per-frame duration in milliseconds. When set, the generator
+   *  writes an animation.json sidecar with the timing data. */
+  frame_duration_ms?: number;
 }
 
 export interface TilesetAsset extends BaseAsset {

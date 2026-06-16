@@ -104,7 +104,8 @@
             "frame_height": { "type": "integer", "minimum": 1 },
             "rows": { "type": "integer", "minimum": 1 },
             "columns": { "type": "integer", "minimum": 1 },
-            "show_grid": { "type": "boolean", "default": true }
+            "show_grid": { "type": "boolean", "default": true },
+            "frame_duration_ms": { "type": "number", "minimum": 1, "maximum": 10000, "description": "Per-frame duration in ms; when set, the generator emits an animation.json sidecar" }
           },
           "required": ["frame_width", "frame_height", "rows", "columns"]
         }

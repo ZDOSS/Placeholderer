@@ -141,6 +141,37 @@ export async function generateJob(
     zip.file(`${folder}/.gitkeep`, '');
   }
 
+  // Animated sprite sheets: emit a sidecar animation.json with the
+  // timing data. The sidecar sits next to the sheet so a runtime can
+  // pair them by name.
+  for (const request of job.requests ?? []) {
+    for (const asset of request.assets ?? []) {
+      if (asset.kind !== 'sprite_sheet') continue;
+      const duration = (asset as SpriteSheetAsset).frame_duration_ms;
+      if (duration == null) continue;
+      const safePath = asset.output_path ? sanitizePath(asset.output_path) : '';
+      const safeName = sanitizeFilename(asset.name);
+      const sheet = `${safeName}.${(asset.format || 'png').toLowerCase()}`;
+      const sheetPath = safePath ? `${safePath}/${sheet}` : sheet;
+      const totalFrames = asset.rows * asset.columns;
+      const fps = Math.round(1000 / duration);
+      zip.file(
+        `${safePath ? safePath + '/' : ''}${safeName}.animation.json`,
+        JSON.stringify({
+          sheet: sheetPath,
+          frame_width: asset.frame_width,
+          frame_height: asset.frame_height,
+          rows: asset.rows,
+          columns: asset.columns,
+          frame_count: totalFrames,
+          frame_duration_ms: duration,
+          fps,
+          total_duration_ms: totalFrames * duration,
+        }, null, 2)
+      );
+    }
+  }
+
   // Always emit a manifest report, even on partial failure, so the
   // caller can see what landed and what didn't.
   const report: GenerationReport = buildReport({

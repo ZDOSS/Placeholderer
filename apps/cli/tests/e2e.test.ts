@@ -108,6 +108,42 @@ describe.skipIf(!canRun)('CLI generate (e2e)', () => {
     expect(result.valid).toBe(false);
   });
 
+  it('emits an animation.json sidecar for animated sprite sheets', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'placeholderer-anim-e2e-'));
+    try {
+      const manifest = {
+        schemaVersion: 1,
+        job: { name: 'anim_e2e' },
+        requests: [{
+          name: 'enemies',
+          assets: [{
+            kind: 'sprite_sheet',
+            name: 'slime_idle',
+            width: 64, height: 32, format: 'png',
+            output_path: 'enemies',
+            frame_width: 32, frame_height: 32,
+            rows: 1, columns: 2,
+            frame_duration_ms: 150,
+          }],
+        }],
+      };
+      const result = await generateJob(manifest, nodeCanvasBackend);
+      expect(result.success).toBe(true);
+
+      const zip = await JSZip.loadAsync(result.zip!);
+      const sidecar = zip.file('enemies/slime_idle.animation.json');
+      expect(sidecar).toBeDefined();
+      const anim = JSON.parse(await sidecar!.async('text'));
+      expect(anim.sheet).toBe('enemies/slime_idle.png');
+      expect(anim.frame_count).toBe(2);
+      expect(anim.frame_duration_ms).toBe(150);
+      expect(anim.fps).toBe(7);
+      expect(anim.total_duration_ms).toBe(300);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('generates a WAV audio asset with a valid RIFF header', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'placeholderer-audio-e2e-'));
     try {
