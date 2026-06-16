@@ -817,6 +817,21 @@ function PropertiesPanel({ layer, onUpdate, colors }: PropertiesPanelProps) {
         />
       </Field>
 
+      {layer.effects?.glow && (
+        <Field label="Glow color">
+          <input
+            type="color"
+            value={glowColorToHex(layer.effects.glow.color)}
+            onChange={(e) => {
+              const effects = layer.effects ?? {};
+              const glow = effects.glow ?? { blur: 8 };
+              onUpdate({ effects: { ...effects, glow: { ...glow, color: hexToRgba(e.target.value, glow.color) } } });
+            }}
+            style={{ ...inputStyle(colors), padding: 0, height: 28 }}
+          />
+        </Field>
+      )}
+
       <Field label="Opacity">
         <input type="range" min="0" max="1" step="0.05" value={layer.opacity ?? 1} onChange={(e) => onUpdate({ opacity: parseFloat(e.target.value) })} style={{ width: '100%' }} />
       </Field>
@@ -864,6 +879,32 @@ function Field({ label, children, wide }: { label: string; children: React.React
       {children}
     </div>
   );
+}
+
+/** Convert any CSS color to a #rrggbb hex so a native color picker
+ *  can edit it. Falls back to white if we can't parse it. */
+function glowColorToHex(color: string | undefined): string {
+  if (!color) return '#ffffff';
+  if (color.startsWith('#')) {
+    if (color.length === 7) return color;
+    if (color.length === 4) {
+      return '#' + color.slice(1).split('').map((c) => c + c).join('');
+    }
+    return color.slice(0, 7);
+  }
+  return '#ffffff';
+}
+
+/** Convert a hex color picked by the native input to an rgba string,
+ *  preserving the alpha of an existing glow color when present. */
+function hexToRgba(hex: string, existing: string | undefined): string {
+  const m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex);
+  if (!m) return existing ?? 'rgba(255,255,255,0.6)';
+  const r = parseInt(m[1], 16), g = parseInt(m[2], 16), b = parseInt(m[3], 16);
+  const a = existing && /[\d.]+\s*\)\s*$/.test(existing)
+    ? existing.match(/[\d.]+\s*\)/)![0].replace(')', '')
+    : '0.6';
+  return `rgba(${r},${g},${b},${a})`;
 }
 
 function inputStyle(colors: typeof import('./colors').colors) {

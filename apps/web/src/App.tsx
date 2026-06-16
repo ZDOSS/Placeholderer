@@ -144,8 +144,8 @@ function App() {
       const cdSize = view.getUint32(bytes.length - 12, true);
       const cdOffset = view.getUint32(bytes.length - 16, true);
       const target = '_placeholderer/manifest-report.json';
+      let entryOffset = cdOffset;
       for (let i = 0; i < totalEntries; i++) {
-        const entryOffset = cdOffset + i * 46;
         const sig = view.getUint32(entryOffset, true);
         if (sig !== 0x02014b50) return;
         const nameLen = view.getUint16(entryOffset + 28, true);
@@ -154,17 +154,23 @@ function App() {
         const localHeaderOffset = view.getUint32(entryOffset + 42, true);
         const nameStart = entryOffset + 46;
         const name = new TextDecoder().decode(bytes.subarray(nameStart, nameStart + nameLen));
-        if (name !== target) continue;
-        // Local file header is 30 bytes + name + extra.
-        const localNameLen = view.getUint16(localHeaderOffset + 26, true);
-        const localExtraLen = view.getUint16(localHeaderOffset + 28, true);
-        const dataStart = localHeaderOffset + 30 + localNameLen + localExtraLen;
-        const compMethod = view.getUint16(localHeaderOffset + 8, true);
-        const compSize = view.getUint32(localHeaderOffset + 18, true);
-        if (compMethod !== 0) continue; // not stored; bail
-        const text = new TextDecoder().decode(bytes.subarray(dataStart, dataStart + compSize));
-        setManifestReport(JSON.parse(text) as GenerationReport);
-        return;
+        if (name === target) {
+          // Local file header is 30 bytes + name + extra.
+          const localNameLen = view.getUint16(localHeaderOffset + 26, true);
+          const localExtraLen = view.getUint16(localHeaderOffset + 28, true);
+          const dataStart = localHeaderOffset + 30 + localNameLen + localExtraLen;
+          const compMethod = view.getUint16(localHeaderOffset + 8, true);
+          const compSize = view.getUint32(localHeaderOffset + 18, true);
+          if (compMethod === 0) {
+            const text = new TextDecoder().decode(bytes.subarray(dataStart, dataStart + compSize));
+            setManifestReport(JSON.parse(text) as GenerationReport);
+            return;
+          }
+        }
+        // Advance to the next central-directory entry. Each entry is
+        // 46 bytes plus the variable-length name, extra, and comment
+        // fields, not a flat 46 bytes.
+        entryOffset += 46 + nameLen + extraLen + commentLen;
       }
     } catch {
       // Manifest is best-effort. A failure here doesn't block the

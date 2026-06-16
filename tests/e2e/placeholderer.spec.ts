@@ -17,11 +17,12 @@ const STARTER_MANIFEST = JSON.stringify({
 });
 
 test.describe('Placeholderer web app', () => {
+  // Generous timeouts because the dev server cold-starts in CI.
+  test.setTimeout(60_000);
+
   test('imports a manifest, generates a ZIP, shows the manifest report', async ({ page }) => {
-    // Capture downloads.
     const downloadPromise = page.waitForEvent('download');
 
-    // Land on the home view; the JSON tab is selected by default.
     await page.goto('/');
     await page.getByRole('heading', { name: 'Import Manifest' }).waitFor();
 
@@ -41,17 +42,28 @@ test.describe('Placeholderer web app', () => {
     const download = await downloadPromise;
     expect(download.suggestedFilename()).toBe('e2e_smoke.zip');
 
-    // The manifest report panel should appear in the UI.
-    await page.getByText('Manifest report').waitFor();
+    // The manifest report panel should appear in the UI. Wait
+    // explicitly for the panel heading (a <strong> inside the panel
+    // div) so we don't race the manual ZIP decoder.
+    await page.locator('strong', { hasText: 'Manifest report' }).waitFor();
     await expect(page.getByText('Total')).toBeVisible();
     await expect(page.getByText('Successful')).toBeVisible();
   });
 
   test('theme toggle switches the data-theme attribute', async ({ page }) => {
     await page.goto('/');
-    // Default to light (no data-theme or 'light').
+
+    // The button's accessible name comes from its aria-label; the
+    // title attribute is for tooltips and not used by role-based
+    // queries. Click by aria-label, which is stable across themes.
+    const toggle = page.getByRole('button', { name: 'Toggle theme' });
+    await toggle.waitFor();
+
     const initial = await page.evaluate(() => document.documentElement.getAttribute('data-theme'));
-    await page.getByRole('button', { name: /Switch to dark theme/ }).click();
+    await toggle.click();
+    // Allow the React effect to run before reading.
+    await page.waitForFunction((prev) =>
+      document.documentElement.getAttribute('data-theme') !== prev, initial);
     const after = await page.evaluate(() => document.documentElement.getAttribute('data-theme'));
     expect(after).not.toBe(initial);
   });

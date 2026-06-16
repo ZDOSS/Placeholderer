@@ -105,11 +105,23 @@ export async function generateJob(
         const filename = `${safeName}.${ext}`;
         const fullPath = safePath ? `${safePath}/${filename}` : filename;
 
-        if (createdFiles.includes(fullPath)) {
+        // Animated sprite sheets emit a sidecar; reserve its path
+        // here so the duplicate check covers both the sheet and the
+        // sidecar, and an explicit user file with the same name wins
+        // (we skip the sidecar in that case).
+        let sidecarPath: string | null = null;
+        if (asset.kind === 'sprite_sheet' && (asset as SpriteSheetAsset).frame_duration_ms != null) {
+          const sidecarFile = `${safeName}.animation.json`;
+          sidecarPath = safePath ? `${safePath}/${sidecarFile}` : sidecarFile;
+        }
+
+        const existingIndex = createdFiles.indexOf(fullPath);
+        if (existingIndex >= 0 || (sidecarPath && createdFiles.includes(sidecarPath))) {
           errors.push(`${asset.name}: duplicate output path "${fullPath}"`);
           continue;
         }
         createdFiles.push(fullPath);
+        if (sidecarPath) createdFiles.push(sidecarPath);
 
         let bytes: Uint8Array;
         if (asset.kind === 'audio') {
@@ -143,20 +155,30 @@ export async function generateJob(
 
   // Animated sprite sheets: emit a sidecar animation.json with the
   // timing data. The sidecar sits next to the sheet so a runtime can
-  // pair them by name.
+  // pair them by name. Reserved in the main asset loop so its path
+  // participates in duplicate detection and is reported in the manifest.
   for (const request of job.requests ?? []) {
     for (const asset of request.assets ?? []) {
       if (asset.kind !== 'sprite_sheet') continue;
-      const duration = (asset as SpriteSheetAsset).frame_duration_ms;
-      if (duration == null) continue;
+      const sa = asset as SpriteSheetAsset;
+      if (sa.frame_duration_ms == null) continue;
       const safePath = asset.output_path ? sanitizePath(asset.output_path) : '';
       const safeName = sanitizeFilename(asset.name);
       const sheet = `${safeName}.${(asset.format || 'png').toLowerCase()}`;
       const sheetPath = safePath ? `${safePath}/${sheet}` : sheet;
+      const sidecarFile = `${safeName}.animation.json`;
+      const sidecarPath = safePath ? `${safePath}/${sidecarFile}` : sidecarFile;
+      // Only emit if the asset actually rendered (sidecar is in
+      // createdFiles only when the sheet was added successfully).
+      if (!createdFiles.includes(sheetPath)) continue;
+      // If the user provided an explicit file with the same name, we
+      // reserved the sidecar path in the main loop but never wrote
+      // the sheet — skip the sidecar in that case too.
+      if (!createdFiles.includes(sidecarPath)) continue;
       const totalFrames = asset.rows * asset.columns;
-      const fps = Math.round(1000 / duration);
+      const fps = Math.round(1000 / sa.frame_duration_ms);
       zip.file(
-        `${safePath ? safePath + '/' : ''}${safeName}.animation.json`,
+        sidecarPath,
         JSON.stringify({
           sheet: sheetPath,
           frame_width: asset.frame_width,
@@ -164,9 +186,9 @@ export async function generateJob(
           rows: asset.rows,
           columns: asset.columns,
           frame_count: totalFrames,
-          frame_duration_ms: duration,
+          frame_duration_ms: sa.frame_duration_ms,
           fps,
-          total_duration_ms: totalFrames * duration,
+          total_duration_ms: totalFrames * sa.frame_duration_ms,
         }, null, 2)
       );
     }

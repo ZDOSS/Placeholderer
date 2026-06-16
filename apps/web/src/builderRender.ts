@@ -232,7 +232,16 @@ function drawCircle(ctx: CanvasRenderingContext2D, layer: any, cx: number, cy: n
   ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
   ctx.fillStyle = resolveFill(layer.fill, '#4A5568', ctx);
   ctx.fill();
-  drawImageFillOverlay(ctx, layer, cx - rx, cy - ry, w, h);
+  // Image fills must be clipped to the ellipse path, otherwise the
+  // overlay draws a full rectangle around the circle. Restore so the
+  // stroke below isn't clipped.
+  const fill: any = layer.fill;
+  if (fill && typeof fill === 'object' && fill.type === 'image' && fill.src) {
+    ctx.save();
+    ctx.clip();
+    drawImageFillOverlay(ctx, layer, cx - rx, cy - ry, w, h);
+    ctx.restore();
+  }
   const stroke = strokeToStroke(layer.stroke);
   if (stroke) {
     ctx.strokeStyle = stroke.color;
