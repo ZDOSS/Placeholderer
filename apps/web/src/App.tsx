@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { validateManifest, generateJob } from '@placeholderer/core';
-import { Job, Request, Asset, SafeAdjustment } from './types';
+import type { Manifest, Asset, SafeAdjustment } from '@placeholderer/schemas';
 import { AssetPreview } from './AssetPreview';
 import { UIBuilder } from './UIBuilder';
 import { Templates } from './Templates';
@@ -20,7 +20,7 @@ const navButtonStyle = (active: boolean) => ({
 
 function App() {
   const [view, setView] = useState<View>('home');
-  const [job, setJob] = useState<Job | null>(null);
+  const [job, setJob] = useState<Manifest | null>(null);
   const [selectedAsset, setSelectedAsset] = useState<{ requestIndex: number; assetIndex: number; asset: Asset } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [expandedRequests, setExpandedRequests] = useState<Set<number>>(new Set());
@@ -34,7 +34,7 @@ function App() {
       const result = validateManifest(parsed);
       
       if (result.valid) {
-        setJob(parsed as Job);
+        setJob(parsed as Manifest);
         setView('overview');
         setError(null);
         setExpandedRequests(new Set());
@@ -73,7 +73,9 @@ function App() {
     if (adjustment.label_enabled !== undefined) asset.label_enabled = adjustment.label_enabled;
     if (adjustment.numbering_style) asset.numbering_style = adjustment.numbering_style;
     if (adjustment.label_position) asset.label_position = adjustment.label_position;
-    if (adjustment.panel_guides !== undefined) asset.panel_guides = adjustment.panel_guides;
+    if (adjustment.panel_guides !== undefined && asset.kind === 'ui_panel') {
+      asset.panel_guides = adjustment.panel_guides;
+    }
 
     setJob(updatedJob);
     setSelectedAsset({ ...selectedAsset, asset: { ...asset } });
