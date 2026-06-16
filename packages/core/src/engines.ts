@@ -19,9 +19,9 @@ export interface EngineGuide {
 export const ENGINE_GUIDES: EngineGuide[] = [
   {
     engine: 'Godot',
-    defaultPath: 'res://art/',
+    defaultPath: 'art/',
     namingConvention: 'snake_case; group by feature, not by type',
-    sizingNotes: 'Tiles 16/32/64; UI at @1x/@2x/@3x of 1px base',
+    sizingNotes: 'Tiles 16/32/64; UI at @1x/@2x/@3x of 1px base. In Godot, the ZIP is extracted to res:// — so art/ here maps to res://art/ on disk.',
   },
   {
     engine: 'Unity',

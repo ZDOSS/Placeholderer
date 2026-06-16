@@ -39,7 +39,7 @@ describe('engine catalog', () => {
 });
 
 describe('buildStarterManifest', () => {
-  it('Godot mixed uses res://art/ paths', () => {
+  it('Godot mixed uses art/ paths (the res:// prefix lives in the guide text, not the manifest)', () => {
     const guide = getGuide('Godot')!;
     const manifest = buildStarterManifest({
       engine: 'Godot',
@@ -48,8 +48,9 @@ describe('buildStarterManifest', () => {
       jobName: 'godot_pack',
     }) as any;
     expect(manifest.job.name).toBe('godot_pack');
-    expect(manifest.requests[0].folders).toContain('res://art/ui/panels');
-    expect(manifest.requests[0].assets.some((a: any) => a.output_path === 'res://art/ui/panels')).toBe(true);
+    expect(manifest.requests[0].folders).toContain('art/ui/panels');
+    expect(manifest.requests[0].assets.some((a: any) => a.output_path === 'art/ui/panels')).toBe(true);
+    expect(guide.sizingNotes).toContain('res://');
   });
 
   it('Unity sprite_sheet uses Assets/Art/', () => {

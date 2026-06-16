@@ -11,7 +11,7 @@ import {
 } from '@placeholderer/schemas';
 import { validateBuilderRecipe } from '@placeholderer/core';
 import { colors } from './colors';
-import { renderLayer, exportSVG, type SupportedExportFormat } from './builderRender';
+import { renderLayer, exportSVG, preloadRasterImages, type SupportedExportFormat } from './builderRender';
 
 const STORAGE_KEY = 'placeholderer:builder';
 const HISTORY_LIMIT = 5;
@@ -153,7 +153,7 @@ export function UIBuilder() {
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const isInteracting = useRef<{ mode: 'move' | 'resize' | null; resizeHandle?: string; offsetX: number; offsetY: number; startW: number; startH: number }>({ mode: null, offsetX: 0, offsetY: 0, startW: 0, startH: 0 });
+  const isInteracting = useRef<{ mode: 'move' | 'resize' | null; resizeHandle?: string; offsetX: number; offsetY: number; startW: number; startH: number; preState: BuilderState | null }>({ mode: null, offsetX: 0, offsetY: 0, startW: 0, startH: 0, preState: null });
 
   // Persist on every state change
   useEffect(() => { saveToStorage(state); }, [state]);
@@ -314,6 +314,11 @@ export function UIBuilder() {
       download(blob, 'ui-placeholder.svg');
       return;
     }
+    // Wait for any imported raster images to finish loading before
+    // capturing the export. Without this, an imported image is
+    // silently absent from the resulting PNG/JPG because drawRaster
+    // kicks off an async image load and the toBlob call races it.
+    await preloadRasterImages(state.layers);
     // PNG / JPEG: render to an off-screen canvas (the on-screen canvas
     // is already showing this state).
     const canvas = document.createElement('canvas');
@@ -396,7 +401,7 @@ export function UIBuilder() {
       if (sel) {
         const handle = getResizeHandle(sel, mx, my);
         if (handle) {
-          isInteracting.current = { mode: 'resize', resizeHandle: handle, offsetX: 0, offsetY: 0, startW: sel.width ?? 0, startH: sel.height ?? 0 };
+          isInteracting.current = { mode: 'resize', resizeHandle: handle, offsetX: 0, offsetY: 0, startW: sel.width ?? 0, startH: sel.height ?? 0, preState: state };
           return;
         }
       }
@@ -414,6 +419,7 @@ export function UIBuilder() {
       offsetY: my - (hit.y ?? 0),
       startW: hit.width ?? 0,
       startH: hit.height ?? 0,
+      preState: state,
     };
   };
 
@@ -459,16 +465,18 @@ export function UIBuilder() {
   };
 
   const handleMouseUp = () => {
-    if (isInteracting.current.mode) {
-      // Snapshot the new state into history now that the gesture is done.
-      // (Avoid snapshotting every frame during a drag.)
+    if (isInteracting.current.mode && isInteracting.current.preState) {
+      // Snapshot the PRE-gesture state into history so undo actually
+      // restores the position the user started from, not the post-drag
+      // position (which is what 'state' holds by now).
+      const pre = isInteracting.current.preState;
       setHistory((h) => {
         const trimmed = h.length >= HISTORY_LIMIT ? h.slice(1) : h;
-        return [...trimmed, state];
+        return [...trimmed, pre];
       });
       setFuture([]);
     }
-    isInteracting.current = { mode: null, offsetX: 0, offsetY: 0, startW: 0, startH: 0 };
+    isInteracting.current = { mode: null, offsetX: 0, offsetY: 0, startW: 0, startH: 0, preState: null };
   };
 
   const selectedLayer = state.layers.find((l) => l.id === selectedId) ?? null;

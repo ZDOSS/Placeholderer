@@ -59,28 +59,34 @@ export async function runGenerate(flags: GenerateFlags): Promise<void> {
 
   const result = await generateJob(manifest, nodeCanvasBackend);
 
-  if (!result.success || !result.zip) {
-    if (isJsonMode(flags)) {
-      printJson({ ok: false, stage: 'generation', errors: result.errors });
-    } else {
-      printError({ json: false, quiet: false },
-        'generation failed',
-        result.errors.join('\n'));
-    }
-    throw new CliError(ExitCode.Generation, 'generation failed');
-  }
-
   // Default to the core's suggested name (sanitized job.name + .zip).
   const outPath = flags.out
     ? resolve(flags.out)
     : resolve(result.suggestedName ?? 'placeholders.zip');
 
-  try {
-    await writeFile(outPath, result.zip);
-  } catch (err: any) {
-    printError({ json: !!flags.json, quiet: !!flags.quiet },
-      `cannot write ${outPath}`, err?.message);
-    throw new CliError(ExitCode.IO, `cannot write ${outPath}`);
+  // Write the ZIP whenever generateJob produced one — even on partial
+  // failure, the archive contains every successful file plus an
+  // _placeholderer/error-report.json. Discarding it loses the partial
+  // work the user did. We still surface the error and exit non-zero.
+  if (result.zip) {
+    try {
+      await writeFile(outPath, result.zip);
+    } catch (err: any) {
+      printError({ json: !!flags.json, quiet: !!flags.quiet },
+        `cannot write ${outPath}`, err?.message);
+      throw new CliError(ExitCode.IO, `cannot write ${outPath}`);
+    }
+  }
+
+  if (!result.success) {
+    if (isJsonMode(flags)) {
+      printJson({ ok: false, stage: 'generation', errors: result.errors, output: outPath });
+    } else {
+      printError({ json: false, quiet: false },
+        'generation had errors (partial ZIP written)',
+        result.errors.join('\n'));
+    }
+    throw new CliError(ExitCode.Generation, 'generation failed');
   }
 
   if (isJsonMode(flags)) {

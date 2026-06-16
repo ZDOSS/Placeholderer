@@ -160,11 +160,46 @@ function drawText(ctx: CanvasRenderingContext2D, layer: any, x: number, y: numbe
   ctx.fillText(content, textX, y + fontSize);
 }
 
+// Cache for raster sources so the on-screen render and the export
+// path can both await a fully-loaded image before drawing.
+const rasterCache = new Map<string, HTMLImageElement>();
+
+/** Preload all raster sources referenced by the layer stack.
+ *  Returns a promise that resolves once every image is loaded (or has
+ *  failed). The export path awaits this so PNG/JPG outputs include
+ *  the imported raster layers instead of silently omitting them. */
+export function preloadRasterImages(layers: Layer[]): Promise<void> {
+  const sources = new Set<string>();
+  for (const l of layers) {
+    if (l.type === 'raster' && l.rasterSrc) sources.add(l.rasterSrc);
+  }
+  const promises: Promise<void>[] = [];
+  for (const src of sources) {
+    const cached = rasterCache.get(src);
+    if (cached && cached.complete && cached.naturalWidth > 0) continue;
+    promises.push(new Promise<void>((resolve) => {
+      const img = new Image();
+      img.onload = () => { rasterCache.set(src, img); resolve(); };
+      img.onerror = () => { resolve(); };
+      img.src = src;
+    }));
+  }
+  return Promise.all(promises).then(() => undefined);
+}
+
 function drawRaster(dc: BuilderCtx, layer: any, x: number, y: number, w: number, h: number): void {
   const src = layer.rasterSrc;
   if (!src) return;
+  const cached = rasterCache.get(src);
+  if (cached && cached.complete && cached.naturalWidth > 0) {
+    dc.ctx.drawImage(cached, x, y, w, h);
+    return;
+  }
   const img = new Image();
-  img.onload = () => dc.ctx.drawImage(img, x, y, w, h);
+  img.onload = () => {
+    rasterCache.set(src, img);
+    dc.ctx.drawImage(img, x, y, w, h);
+  };
   img.src = src;
 }
 
@@ -197,17 +232,21 @@ export type SupportedExportFormat = 'png' | 'jpeg' | 'svg';
  * (per the v1 spec's required export formats).
  */
 export function exportSVG(layers: Layer[], width: number, height: number): string {
-  const body = layers
-    .filter((l) => l.visible)
-    .map((l) => layerToSVG(l))
-    .join('\n');
+  const visible = layers.filter((l) => l.visible);
+  const rendered = visible.map((l) => layerToSVG(l));
+  const body = rendered.map((r) => r.markup).join('\n');
+  const defs = rendered
+    .map((r) => r.filter?.def ?? '')
+    .filter(Boolean)
+    .join('\n  ');
+  const defsBlock = defs ? `\n  <defs>\n  ${defs}\n  </defs>` : '';
   return `<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
+<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">${defsBlock}
 ${body}
 </svg>`;
 }
 
-function layerToSVG(layer: Layer): string {
+function layerToSVG(layer: Layer): { markup: string; filter: FilterSpec | null } {
   const x = layer.x ?? 0;
   const y = layer.y ?? 0;
   const w = layer.width ?? 0;
@@ -220,15 +259,21 @@ function layerToSVG(layer: Layer): string {
     ? ` transform="rotate(${layer.rotation} ${x + w / 2} ${y + h / 2})"`
     : '';
   const filter = buildSVGFilter(layer);
+  const filterAttr = filter?.ref ?? '';
 
   switch (layer.type) {
-    case 'rect':
-      return `  <rect x="${x}" y="${y}" width="${w}" height="${h}" fill="${fill}"${strokeAttr}${opacity}${transform}${filter}/>`;
-    case 'circle':
-      return `  <ellipse cx="${x + w / 2}" cy="${y + h / 2}" rx="${w / 2}" ry="${h / 2}" fill="${fill}"${strokeAttr}${opacity}${transform}${filter}/>`;
+    case 'rect': {
+      const markup = `  <rect x="${x}" y="${y}" width="${w}" height="${h}" fill="${fill}"${strokeAttr}${opacity}${transform}${filterAttr}/>`;
+      return { markup, filter };
+    }
+    case 'circle': {
+      const markup = `  <ellipse cx="${x + w / 2}" cy="${y + h / 2}" rx="${w / 2}" ry="${h / 2}" fill="${fill}"${strokeAttr}${opacity}${transform}${filterAttr}/>`;
+      return { markup, filter };
+    }
     case 'line': {
       const strokeDef = stroke ?? { color: '#718096', width: 2 };
-      return `  <line x1="${x}" y1="${y + h / 2}" x2="${x + w}" y2="${y + h / 2}" stroke="${strokeDef.color}" stroke-width="${strokeDef.width}"${opacity}${transform}/>`;
+      const markup = `  <line x1="${x}" y1="${y + h / 2}" x2="${x + w}" y2="${y + h / 2}" stroke="${strokeDef.color}" stroke-width="${strokeDef.width}"${opacity}${transform}/>`;
+      return { markup, filter: null };
     }
     case 'text': {
       const content = escapeXML(layer.text?.content ?? layer.name ?? 'Text');
@@ -237,35 +282,45 @@ function layerToSVG(layer: Layer): string {
       const align = layer.text?.align ?? 'left';
       const textAnchor = align === 'center' ? 'middle' : align === 'right' ? 'end' : 'start';
       const textX = align === 'center' ? x + w / 2 : align === 'right' ? x + w : x;
-      return `  <text x="${textX}" y="${y + fontSize}" fill="${fill}" font-family="${fontFamily}" font-size="${fontSize}" font-weight="bold" text-anchor="${textAnchor}"${opacity}${transform}>${content}</text>`;
+      const markup = `  <text x="${textX}" y="${y + fontSize}" fill="${fill}" font-family="${fontFamily}" font-size="${fontSize}" font-weight="bold" text-anchor="${textAnchor}"${opacity}${transform}>${content}</text>`;
+      return { markup, filter: null };
     }
-    case 'raster':
-      return layer.rasterSrc
+    case 'raster': {
+      const markup = layer.rasterSrc
         ? `  <image x="${x}" y="${y}" width="${w}" height="${h}" href="${escapeXML(layer.rasterSrc)}"${opacity}${transform}/>`
         : '';
+      return { markup, filter: null };
+    }
     case 'filled-shape': {
       const r = Math.min(8, w / 4, h / 4);
-      return `  <rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${r}" ry="${r}" fill="${fill}"${strokeAttr}${opacity}${transform}${filter}/>`;
+      const markup = `  <rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${r}" ry="${r}" fill="${fill}"${strokeAttr}${opacity}${transform}${filterAttr}/>`;
+      return { markup, filter };
     }
   }
 }
 
-function buildSVGFilter(layer: Layer): string {
-  const parts: string[] = [];
+interface FilterSpec {
+  id: string;
+  def: string;
+  ref: string;
+}
+
+/** Build a filter (definition + reference) for a layer, if it has
+ *  effects. Returns null when the layer has no filter. */
+function buildSVGFilter(layer: Layer): FilterSpec | null {
   if (layer.effects?.shadow) {
     const s = layer.effects.shadow;
-    parts.push(
-      `<filter id="f-${layer.id}-shadow"><feDropShadow dx="${s.offsetX ?? 0}" dy="${s.offsetY ?? 4}" stdDeviation="${(s.blur ?? 8) / 2}" flood-color="${s.color ?? 'rgba(0,0,0,0.5)'}"/></filter>`
-    );
+    const id = `f-${layer.id}-shadow`;
+    const def = `<filter id="${id}"><feDropShadow dx="${s.offsetX ?? 0}" dy="${s.offsetY ?? 4}" stdDeviation="${(s.blur ?? 8) / 2}" flood-color="${s.color ?? 'rgba(0,0,0,0.5)'}"/></filter>`;
+    return { id, def, ref: ` filter="url(#${id})"` };
   }
   if (layer.effects?.glow) {
     const g = layer.effects.glow;
-    parts.push(
-      `<filter id="f-${layer.id}-glow"><feGaussianBlur stdDeviation="${(g.blur ?? 12) / 2}"/></filter>`
-    );
+    const id = `f-${layer.id}-glow`;
+    const def = `<filter id="${id}"><feGaussianBlur stdDeviation="${(g.blur ?? 12) / 2}"/></filter>`;
+    return { id, def, ref: ` filter="url(#${id})"` };
   }
-  if (parts.length === 0) return '';
-  return ` filter="url(#f-${layer.id}-${layer.effects?.shadow ? 'shadow' : 'glow'})"`;
+  return null;
 }
 
 function escapeXML(text: string): string {
