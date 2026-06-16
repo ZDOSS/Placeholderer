@@ -111,7 +111,11 @@ function App() {
       setLastReport(result);
       
       if (result.success && result.zip) {
-        const url = URL.createObjectURL(result.zip);
+        // Copy into a fresh Uint8Array so the Blob constructor's stricter
+        // ArrayBuffer (not SharedArrayBuffer) typing is satisfied.
+        const bytes = new Uint8Array(result.zip);
+        const blob = new Blob([bytes], { type: 'application/zip' });
+        const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
         a.download = `${job.job?.name || 'placeholders'}.zip`;

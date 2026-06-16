@@ -20,7 +20,7 @@ import type { CanvasBackend, CanvasHandle } from './canvas.js';
 
 export interface GenerateResult {
   success: boolean;
-  zip?: Blob;
+  zip?: Uint8Array;
   errors: string[];
 }
 
@@ -95,6 +95,6 @@ export async function generateJob(
     return { success: false, errors };
   }
 
-  const zipBlob = await zip.generateAsync({ type: 'blob' });
-  return { success: true, zip: zipBlob, errors: [] };
+  const zipBytes = await zip.generateAsync({ type: 'uint8array' });
+  return { success: true, zip: zipBytes, errors: [] };
 }
