@@ -2,7 +2,13 @@
 
 import { writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { isValidEngine, isValidType, renderStarterManifest, type TemplateType } from './templates.js';
+import {
+  isValidEngine,
+  isValidType,
+  buildStarterManifest,
+  getGuide,
+  type TemplateType,
+} from './templates.js';
 import { isJsonMode, isQuietMode, printError, printHuman, printJson } from './output.js';
 import { CliError, ExitCode } from './errors.js';
 
@@ -35,7 +41,17 @@ export async function runInitTemplate(
     throw new CliError(ExitCode.Usage, `unknown type: ${type}`);
   }
 
-  const manifest = renderStarterManifest(engine, type as TemplateType);
+  const guide = getGuide(engine);
+  if (!guide) {
+    throw new CliError(ExitCode.Usage, `unknown engine: ${engine}`);
+  }
+  const jobName = `${engine.toLowerCase()}_placeholders`;
+  const manifest = buildStarterManifest({
+    engine,
+    type: type as TemplateType,
+    guide,
+    jobName,
+  });
 
   if (isJsonMode(flags) && !flags.out) {
     // Emit to stdout so the caller can pipe it to validate or use as-is.

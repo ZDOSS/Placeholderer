@@ -1,55 +1,30 @@
 import { useState } from 'react';
+import {
+  ALL_ENGINES,
+  V1_ENGINES,
+  V1_1_ENGINES,
+  TEMPLATE_TYPES,
+  getGuide,
+  buildStarterManifest,
+  type TemplateType,
+} from '@placeholderer/core';
 
-const engines = ['Godot', 'Unity', 'RPG Maker', 'GameMaker', 'Unreal', 'GDevelop', 'O3DE'];
-
-type AssetType = 'image' | 'sprite_sheet' | 'ui_panel' | 'tileset' | 'mixed';
-
-const assetTypes: AssetType[] = ['image', 'sprite_sheet', 'ui_panel', 'tileset', 'mixed'];
-
-const getTemplate = (engine: string, type: AssetType): string => {
-  const base = {
-    schemaVersion: 1,
-    job: { name: `${engine.toLowerCase()}_placeholders` },
-    requests: [] as any[]
-  };
-
-  if (type === 'mixed') {
-    base.requests = [{
-      name: 'core_assets',
-      assets: [
-        { kind: 'ui_panel', name: 'dialog', width: 480, height: 240, format: 'png', output_path: 'assets/ui' },
-        { kind: 'sprite_sheet', name: 'enemy_idle', width: 256, height: 128, format: 'png', output_path: 'assets/sprites', frame_width: 64, frame_height: 64, rows: 2, columns: 4 }
-      ]
-    }];
-  } else {
-    const asset: any = { kind: type, name: `${type}_example`, width: 256, height: 256, format: 'png', output_path: 'assets' };
-    
-    if (type === 'sprite_sheet') {
-      asset.frame_width = 64;
-      asset.frame_height = 64;
-      asset.rows = 2;
-      asset.columns = 4;
-    }
-    if (type === 'tileset') {
-      asset.tile_width = 32;
-      asset.tile_height = 32;
-    }
-    if (type === 'ui_panel') {
-      asset.panel_guides = true;
-    }
-
-    base.requests = [{ name: 'assets', assets: [asset] }];
-  }
-
-  return JSON.stringify(base, null, 2);
-};
+type AssetType = TemplateType;
 
 export function Templates() {
-  const [selectedEngine, setSelectedEngine] = useState('Godot');
+  const [selectedEngine, setSelectedEngine] = useState(V1_ENGINES[0]);
   const [selectedType, setSelectedType] = useState<AssetType>('mixed');
   const [copied, setCopied] = useState(false);
 
-  const currentTemplate = getTemplate(selectedEngine, selectedType);
+  const guide = getGuide(selectedEngine);
+  const jobName = `${selectedEngine.toLowerCase()}_placeholders`;
+  const manifest = buildStarterManifest({
+    engine: selectedEngine,
+    type: selectedType,
+    guide: guide!,
+    jobName,
+  });
+  const currentTemplate = JSON.stringify(manifest, null, 2);
 
   const copy = () => {
     navigator.clipboard.writeText(currentTemplate);
@@ -60,13 +35,36 @@ export function Templates() {
   return (
     <div style={{ padding: '2rem' }}>
       <h2>Templates</h2>
-      <p style={{ color: '#94a3b8' }}>Choose an engine, then select the asset type you need.</p>
+      <p style={{ color: '#94a3b8' }}>
+        Choose an engine, then select the asset type. Each engine produces
+        starter content with its preferred folder root, naming convention,
+        and sizing notes.
+      </p>
 
-      {/* Engine Selection */}
+      {/* Engine Selection — v1 first, then v1.1 */}
       <div style={{ margin: '1.5rem 0 1rem' }}>
-        <div style={{ fontSize: '0.85rem', color: '#64748b', marginBottom: '0.5rem' }}>Engine</div>
+        <div style={{ fontSize: '0.85rem', color: '#64748b', marginBottom: '0.5rem' }}>Engine (v1)</div>
         <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-          {engines.map(engine => (
+          {V1_ENGINES.map(engine => (
+            <button
+              key={engine}
+              onClick={() => setSelectedEngine(engine)}
+              style={{
+                padding: '0.5rem 1rem',
+                background: selectedEngine === engine ? '#2563eb' : '#334155',
+                color: '#fff',
+                border: 'none',
+                borderRadius: '6px',
+                cursor: 'pointer'
+              }}
+            >
+              {engine}
+            </button>
+          ))}
+        </div>
+        <div style={{ fontSize: '0.85rem', color: '#64748b', margin: '0.75rem 0 0.5rem' }}>Engine (v1.1)</div>
+        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+          {V1_1_ENGINES.map(engine => (
             <button
               key={engine}
               onClick={() => setSelectedEngine(engine)}
@@ -85,11 +83,28 @@ export function Templates() {
         </div>
       </div>
 
+      {/* Engine guidance */}
+      {guide && (
+        <div style={{
+          margin: '1rem 0',
+          padding: '0.75rem 1rem',
+          background: '#1e2937',
+          border: '1px solid #334155',
+          borderRadius: '6px',
+          fontSize: '0.85rem',
+          color: '#cbd5e1',
+        }}>
+          <div><strong>Default path:</strong> <code style={{ color: '#93c5fd' }}>{guide.defaultPath}</code></div>
+          <div><strong>Naming:</strong> {guide.namingConvention}</div>
+          <div><strong>Sizing:</strong> {guide.sizingNotes}</div>
+        </div>
+      )}
+
       {/* Asset Type Selection */}
       <div style={{ marginBottom: '1.5rem' }}>
         <div style={{ fontSize: '0.85rem', color: '#64748b', marginBottom: '0.5rem' }}>Asset Type</div>
         <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-          {assetTypes.map(type => (
+          {TEMPLATE_TYPES.map(type => (
             <button
               key={type}
               onClick={() => setSelectedType(type)}
@@ -110,10 +125,10 @@ export function Templates() {
       </div>
 
       {/* Template Output */}
-      <pre style={{ 
-        background: '#0f172a', 
+      <pre style={{
+        background: '#0f172a',
         color: '#e2e8f0',
-        padding: '1.5rem', 
+        padding: '1.5rem',
         borderRadius: '8px',
         fontSize: '0.85rem',
         border: '1px solid #334155',
@@ -123,9 +138,9 @@ export function Templates() {
         {currentTemplate}
       </pre>
 
-      <button 
-        onClick={copy} 
-        style={{ 
+      <button
+        onClick={copy}
+        style={{
           marginTop: '1rem',
           padding: '0.6rem 1.5rem',
           background: '#2563eb',
