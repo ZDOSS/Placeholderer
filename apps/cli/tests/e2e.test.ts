@@ -107,4 +107,44 @@ describe.skipIf(!canRun)('CLI generate (e2e)', () => {
     const result = core.validateManifest(bad);
     expect(result.valid).toBe(false);
   });
+
+  it('generates a WAV audio asset with a valid RIFF header', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'placeholderer-audio-e2e-'));
+    try {
+      const manifest = {
+        schemaVersion: 1,
+        job: { name: 'audio_e2e' },
+        requests: [{
+          name: 'sfx',
+          assets: [{
+            kind: 'audio',
+            name: 'beep',
+            width: 1, height: 1, format: 'wav',
+            output_path: 'sfx',
+            frequency: 440,
+            duration: 0.25,
+            sample_rate: 22050,
+          }],
+        }],
+      };
+      const result = await generateJob(manifest, nodeCanvasBackend);
+      expect(result.success).toBe(true);
+
+      // Open the ZIP and pull the WAV out.
+      const zip = await JSZip.loadAsync(result.zip!);
+      const wavEntry = zip.file('sfx/beep.wav');
+      expect(wavEntry).toBeDefined();
+      const bytes = await wavEntry!.async('uint8array');
+      // RIFF/WAVE header check
+      const view = new DataView(bytes.buffer);
+      expect(String.fromCharCode(view.getUint8(0), view.getUint8(1), view.getUint8(2), view.getUint8(3))).toBe('RIFF');
+      expect(String.fromCharCode(view.getUint8(8), view.getUint8(9), view.getUint8(10), view.getUint8(11))).toBe('WAVE');
+      // PCM format
+      expect(view.getUint16(20, true)).toBe(1); // PCM
+      expect(view.getUint16(22, true)).toBe(1); // mono
+      expect(view.getUint32(24, true)).toBe(22050); // sample rate
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });

@@ -2,7 +2,7 @@
 // Single source of truth — apps should import from @placeholderer/schemas
 // rather than redefining these shapes locally.
 
-export type AssetKind = 'image' | 'sprite_sheet' | 'tileset' | 'ui_panel';
+export type AssetKind = 'image' | 'sprite_sheet' | 'tileset' | 'ui_panel' | 'audio';
 
 export type Format = 'png' | 'jpg' | 'jpeg' | 'webp';
 
@@ -86,7 +86,19 @@ export interface UiPanelAsset extends BaseAsset {
   export_panel_metadata?: boolean;
 }
 
-export type Asset = ImageAsset | SpriteSheetAsset | TilesetAsset | UiPanelAsset;
+export interface AudioAsset extends BaseAsset {
+  kind: 'audio';
+  /** Tone frequency in Hz. */
+  frequency: number;
+  /** Duration in seconds. */
+  duration: number;
+  /** Sample rate in Hz. Defaults to 44100. */
+  sample_rate?: number;
+  /** Peak amplitude 0..1. Defaults to 0.5. */
+  amplitude?: number;
+}
+
+export type Asset = ImageAsset | SpriteSheetAsset | TilesetAsset | UiPanelAsset | AudioAsset;
 
 export interface Request {
   name?: string;

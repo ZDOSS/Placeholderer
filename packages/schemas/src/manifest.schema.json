@@ -44,7 +44,8 @@
                 { "$ref": "#/definitions/imageAsset" },
                 { "$ref": "#/definitions/spriteSheetAsset" },
                 { "$ref": "#/definitions/tilesetAsset" },
-                { "$ref": "#/definitions/uiPanelAsset" }
+                { "$ref": "#/definitions/uiPanelAsset" },
+                { "$ref": "#/definitions/audioAsset" }
               ]
             }
           }
@@ -62,7 +63,10 @@
         "name": { "type": "string" },
         "width": { "type": "integer", "minimum": 1 },
         "height": { "type": "integer", "minimum": 1 },
-        "format": { "type": "string", "enum": ["png", "jpg", "jpeg", "webp"] },
+        "format": {
+          "type": "string",
+          "description": "Output format. Image-style assets use png/jpg/jpeg/webp; audio uses wav. Each asset kind restricts this further via its own schema."
+        },
         "output_path": {
           "type": "string",
           "pattern": "^(?!/|.*\\.\\.)[a-zA-Z0-9_\\-./]*$",
@@ -79,7 +83,13 @@
     "imageAsset": {
       "allOf": [
         { "$ref": "#/definitions/baseAsset" },
-        { "type": "object", "properties": { "kind": { "const": "image" } } }
+        {
+          "type": "object",
+          "properties": {
+            "kind": { "const": "image" },
+            "format": { "type": "string", "enum": ["png", "jpg", "jpeg", "webp"] }
+          }
+        }
       ]
     },
     "spriteSheetAsset": {
@@ -89,6 +99,7 @@
           "type": "object",
           "properties": {
             "kind": { "const": "sprite_sheet" },
+            "format": { "type": "string", "enum": ["png", "jpg", "jpeg", "webp"] },
             "frame_width": { "type": "integer", "minimum": 1 },
             "frame_height": { "type": "integer", "minimum": 1 },
             "rows": { "type": "integer", "minimum": 1 },
@@ -106,6 +117,7 @@
           "type": "object",
           "properties": {
             "kind": { "const": "tileset" },
+            "format": { "type": "string", "enum": ["png", "jpg", "jpeg", "webp"] },
             "tile_width": { "type": "integer", "minimum": 1 },
             "tile_height": { "type": "integer", "minimum": 1 }
           },
@@ -120,10 +132,28 @@
           "type": "object",
           "properties": {
             "kind": { "const": "ui_panel" },
+            "format": { "type": "string", "enum": ["png", "jpg", "jpeg", "webp"] },
             "frame_style": { "type": "string", "enum": ["simple", "beveled", "inset", "outlined"] },
             "panel_guides": { "type": "boolean", "default": false },
             "export_panel_metadata": { "type": "boolean", "default": false }
           }
+        }
+      ]
+    },
+    "audioAsset": {
+      "allOf": [
+        { "$ref": "#/definitions/baseAsset" },
+        {
+          "type": "object",
+          "properties": {
+            "kind": { "const": "audio" },
+            "format": { "type": "string", "enum": ["wav"] },
+            "frequency": { "type": "number", "minimum": 1, "maximum": 22050, "description": "Tone frequency in Hz" },
+            "duration": { "type": "number", "minimum": 0.01, "maximum": 60, "description": "Duration in seconds" },
+            "sample_rate": { "type": "integer", "minimum": 8000, "maximum": 96000, "default": 44100 },
+            "amplitude": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.5 }
+          },
+          "required": ["frequency", "duration"]
         }
       ]
     }

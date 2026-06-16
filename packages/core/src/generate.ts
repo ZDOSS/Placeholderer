@@ -7,6 +7,7 @@ import type {
   SpriteSheetAsset,
   TilesetAsset,
   UiPanelAsset,
+  AudioAsset,
 } from '@placeholderer/schemas';
 import { sanitizePath, sanitizeFilename } from './path.js';
 import {
@@ -18,6 +19,7 @@ import {
 } from './render.js';
 import type { CanvasBackend } from './canvas.js';
 import { buildReport, type GenerationReport } from './report.js';
+import { generateAudio } from './audio.js';
 
 export interface GenerateResult {
   success: boolean;
@@ -96,7 +98,10 @@ export async function generateJob(
       try {
         const safePath = asset.output_path ? sanitizePath(asset.output_path) : '';
         const safeName = sanitizeFilename(asset.name);
-        const ext = (asset.format || 'png').toLowerCase();
+        // Audio files use the format field for the container extension
+        // (wav by default). Image-style assets fall back to png.
+        const defaultExt = asset.kind === 'audio' ? 'wav' : 'png';
+        const ext = (asset.format || defaultExt).toLowerCase();
         const filename = `${safeName}.${ext}`;
         const fullPath = safePath ? `${safePath}/${filename}` : filename;
 
@@ -106,13 +111,18 @@ export async function generateJob(
         }
         createdFiles.push(fullPath);
 
-        const handle = backend.createCanvas(asset.width, asset.height);
-        drawAsset(asset, {
-          ctx: handle.ctx,
-          width: asset.width,
-          height: asset.height,
-        });
-        const bytes = await handle.encode(formatToMime(asset.format));
+        let bytes: Uint8Array;
+        if (asset.kind === 'audio') {
+          bytes = generateAudio(asset as AudioAsset);
+        } else {
+          const handle = backend.createCanvas(asset.width, asset.height);
+          drawAsset(asset, {
+            ctx: handle.ctx,
+            width: asset.width,
+            height: asset.height,
+          });
+          bytes = await handle.encode(formatToMime(asset.format));
+        }
         zip.file(fullPath, bytes);
         successful++;
       } catch (err: any) {
