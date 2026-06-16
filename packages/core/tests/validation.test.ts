@@ -1,0 +1,133 @@
+import { describe, it, expect } from 'vitest';
+import { validateManifest, validateBuilderRecipe } from '../src/validation.js';
+
+const validManifest = {
+  schemaVersion: 1,
+  requests: [
+    {
+      name: 'test',
+      assets: [
+        {
+          kind: 'image',
+          name: 'foo',
+          width: 64,
+          height: 64,
+          format: 'png',
+          output_path: 'art/foo',
+        },
+      ],
+    },
+  ],
+};
+
+describe('validateManifest', () => {
+  it('accepts a well-formed manifest', () => {
+    const result = validateManifest(validManifest);
+    expect(result.valid).toBe(true);
+    expect(result.errors).toEqual([]);
+  });
+
+  it('rejects null', () => {
+    const result = validateManifest(null);
+    expect(result.valid).toBe(false);
+  });
+
+  it('rejects non-object input', () => {
+    expect(validateManifest('not an object').valid).toBe(false);
+    expect(validateManifest(42).valid).toBe(false);
+  });
+
+  it('rejects missing requests array', () => {
+    const result = validateManifest({ schemaVersion: 1 });
+    expect(result.valid).toBe(false);
+  });
+
+  it('rejects wrong schemaVersion', () => {
+    const result = validateManifest({ ...validManifest, schemaVersion: 2 });
+    expect(result.valid).toBe(false);
+  });
+
+  it('rejects asset missing required fields', () => {
+    const result = validateManifest({
+      schemaVersion: 1,
+      requests: [{ assets: [{ kind: 'image', name: 'foo' }] }],
+    });
+    expect(result.valid).toBe(false);
+    expect(result.errors.length).toBeGreaterThan(0);
+  });
+
+  it('rejects path traversal at the schema layer', () => {
+    const result = validateManifest({
+      ...validManifest,
+      requests: [{
+        ...validManifest.requests[0],
+        assets: [{ ...validManifest.requests[0].assets[0], output_path: '../secrets' }],
+      }],
+    });
+    expect(result.valid).toBe(false);
+  });
+
+  it('rejects leading-slash output_path at the schema layer', () => {
+    const result = validateManifest({
+      ...validManifest,
+      requests: [{
+        ...validManifest.requests[0],
+        assets: [{ ...validManifest.requests[0].assets[0], output_path: '/abs' }],
+      }],
+    });
+    expect(result.valid).toBe(false);
+  });
+
+  it('rejects bad width/height (zero or negative)', () => {
+    const result = validateManifest({
+      ...validManifest,
+      requests: [{
+        ...validManifest.requests[0],
+        assets: [{ ...validManifest.requests[0].assets[0], width: 0 }],
+      }],
+    });
+    expect(result.valid).toBe(false);
+  });
+
+  it('rejects unknown asset kind', () => {
+    const result = validateManifest({
+      ...validManifest,
+      requests: [{
+        ...validManifest.requests[0],
+        assets: [{ ...validManifest.requests[0].assets[0], kind: 'weird_kind' }],
+      }],
+    });
+    expect(result.valid).toBe(false);
+  });
+
+  it('rejects non-enum format', () => {
+    const result = validateManifest({
+      ...validManifest,
+      requests: [{
+        ...validManifest.requests[0],
+        assets: [{ ...validManifest.requests[0].assets[0], format: 'gif' }],
+      }],
+    });
+    expect(result.valid).toBe(false);
+  });
+});
+
+describe('validateBuilderRecipe', () => {
+  it('accepts a well-formed recipe', () => {
+    const result = validateBuilderRecipe({
+      canvasMode: 'compact',
+      layers: [
+        { id: '1', type: 'rect', name: 'bg', visible: true, locked: false },
+      ],
+    });
+    expect(result.valid).toBe(true);
+  });
+
+  it('rejects bad canvasMode', () => {
+    const result = validateBuilderRecipe({
+      canvasMode: 'huge',
+      layers: [],
+    });
+    expect(result.valid).toBe(false);
+  });
+});

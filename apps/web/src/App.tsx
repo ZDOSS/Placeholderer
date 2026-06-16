@@ -1,22 +1,31 @@
 import { useState } from 'react';
-import { validateManifest, generateJob } from '@placeholderer/core';
+import { validateManifest, generateJob, type CanvasBackend, type Canvas2D } from '@placeholderer/core';
 import type { Manifest, Asset, SafeAdjustment } from '@placeholderer/schemas';
 import { AssetPreview } from './AssetPreview';
 import { UIBuilder } from './UIBuilder';
 import { Templates } from './Templates';
 import { CSVImport } from './CSVImport';
+import { useTheme } from './useTheme';
+import { colors } from './colors';
+
+// Browser canvas backend: wraps OffscreenCanvas so the shared core
+// can run without knowing it's in a browser.
+const webCanvasBackend: CanvasBackend = {
+  createCanvas(width, height) {
+    const canvas = new OffscreenCanvas(width, height);
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('failed to acquire 2d context');
+    return {
+      ctx: ctx as unknown as Canvas2D,
+      encode: async (mime) => {
+        const blob = await canvas.convertToBlob({ type: mime });
+        return new Uint8Array(await blob.arrayBuffer());
+      },
+    };
+  },
+};
 
 type View = 'home' | 'overview' | 'detail' | 'builder' | 'templates';
-
-const navButtonStyle = (active: boolean) => ({
-  padding: '0.5rem 1rem',
-  background: active ? '#2563eb' : '#1f2937',
-  color: '#fff',
-  border: 'none',
-  borderRadius: '6px',
-  cursor: 'pointer',
-  fontSize: '0.9rem',
-});
 
 function App() {
   const [view, setView] = useState<View>('home');
@@ -27,12 +36,13 @@ function App() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [importMode, setImportMode] = useState<'json' | 'csv'>('json');
   const [lastReport, setLastReport] = useState<any>(null);
+  const { theme, toggle: toggleTheme } = useTheme();
 
   const handlePaste = (text: string) => {
     try {
       const parsed = JSON.parse(text);
       const result = validateManifest(parsed);
-      
+
       if (result.valid) {
         setJob(parsed as Manifest);
         setView('overview');
@@ -90,14 +100,18 @@ function App() {
     if (!job) return;
     setIsGenerating(true);
     try {
-      const result = await generateJob(job);
+      const result = await generateJob(job, webCanvasBackend);
       setLastReport(result);
-      
+
       if (result.success && result.zip) {
-        const url = URL.createObjectURL(result.zip);
+        // Copy into a fresh Uint8Array so the Blob constructor's stricter
+        // ArrayBuffer (not SharedArrayBuffer) typing is satisfied.
+        const bytes = new Uint8Array(result.zip);
+        const blob = new Blob([bytes], { type: 'application/zip' });
+        const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `${job.job?.name || 'placeholders'}.zip`;
+        a.download = result.suggestedName ?? 'placeholders.zip';
         a.click();
         URL.revokeObjectURL(url);
       } else {
@@ -114,17 +128,22 @@ function App() {
   const contentMaxWidth = isBuilderView ? '100%' : '1200px';
   const contentPadding = isBuilderView ? '1rem 2rem' : '2rem';
 
+  const navButtonStyle = (active: boolean) => ({
+    padding: '0.5rem 1rem',
+    background: active ? colors.accent : colors.bgInset,
+    color: colors.text,
+    border: 'none',
+    borderRadius: '6px',
+    cursor: 'pointer' as const,
+    fontSize: '0.9rem',
+  });
+
   return (
-    <div style={{ 
-      minHeight: '100vh', 
-      background: '#0f172a', 
-      color: '#e2e8f0',
-      fontFamily: 'system-ui, -apple-system, sans-serif'
-    }}>
+    <div style={{ minHeight: '100vh', background: colors.bg, color: colors.text }}>
       {/* Top Navigation */}
-      <div style={{ 
-        background: '#1e2937', 
-        borderBottom: '1px solid #334155',
+      <div style={{
+        background: colors.bgElevated,
+        borderBottom: `1px solid ${colors.border}`,
         padding: '1rem 2rem',
         display: 'flex',
         alignItems: 'center',
@@ -132,13 +151,30 @@ function App() {
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '2rem' }}>
           <h1 style={{ margin: 0, fontSize: '1.5rem', fontWeight: 600 }}>Placeholderer</h1>
-          
+
           <div style={{ display: 'flex', gap: '0.5rem' }}>
             <button onClick={() => setView('home')} style={navButtonStyle(view === 'home')}>Manifest</button>
             <button onClick={() => setView('templates')} style={navButtonStyle(view === 'templates')}>Templates</button>
             <button onClick={() => setView('builder')} style={navButtonStyle(view === 'builder')}>UI Builder</button>
           </div>
         </div>
+
+        <button
+          onClick={toggleTheme}
+          aria-label="Toggle theme"
+          title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`}
+          style={{
+            padding: '0.4rem 0.8rem',
+            background: colors.bgInset,
+            color: colors.text,
+            border: `1px solid ${colors.border}`,
+            borderRadius: '6px',
+            cursor: 'pointer',
+            fontSize: '0.85rem',
+          }}
+        >
+          {theme === 'dark' ? '☀' : '☾'} {theme === 'dark' ? 'Light' : 'Dark'}
+        </button>
       </div>
 
       <div style={{ maxWidth: contentMaxWidth, margin: '0 auto', padding: contentPadding }}>
@@ -147,26 +183,26 @@ function App() {
           <div>
             <div style={{ marginBottom: '1.5rem' }}>
               <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem' }}>
-                <button 
+                <button
                   onClick={() => setImportMode('json')}
-                  style={{ 
-                    padding: '0.5rem 1rem', 
-                    background: importMode === 'json' ? '#3b82f6' : '#334155',
+                  style={{
+                    padding: '0.5rem 1rem',
+                    background: importMode === 'json' ? colors.accent : colors.bgInset,
                     border: 'none',
-                    color: '#fff',
+                    color: colors.text,
                     borderRadius: '6px',
                     cursor: 'pointer'
                   }}
                 >
                   JSON
                 </button>
-                <button 
+                <button
                   onClick={() => setImportMode('csv')}
-                  style={{ 
-                    padding: '0.5rem 1rem', 
-                    background: importMode === 'csv' ? '#3b82f6' : '#334155',
+                  style={{
+                    padding: '0.5rem 1rem',
+                    background: importMode === 'csv' ? colors.accent : colors.bgInset,
                     border: 'none',
-                    color: '#fff',
+                    color: colors.text,
                     borderRadius: '6px',
                     cursor: 'pointer'
                   }}
@@ -180,17 +216,17 @@ function App() {
                   <h2 style={{ marginTop: 0 }}>Import Manifest</h2>
                   <textarea
                     placeholder="Paste your JSON manifest here..."
-                    style={{ 
-                      width: '100%', 
-                      height: '320px', 
-                      background: '#1e2937',
-                      color: '#e2e8f0',
-                      border: '1px solid #475569',
+                    style={{
+                      width: '100%',
+                      height: '320px',
+                      background: colors.bgElevated,
+                      color: colors.text,
+                      border: `1px solid ${colors.borderStrong}`,
                       borderRadius: '8px',
                       padding: '1rem',
                       fontFamily: 'monospace',
                       fontSize: '0.9rem',
-                      resize: 'vertical'
+                      resize: 'vertical' as const
                     }}
                     onChange={(e) => e.target.value.trim().length > 20 && handlePaste(e.target.value)}
                   />
@@ -201,12 +237,12 @@ function App() {
             </div>
 
             {error && (
-              <pre style={{ 
-                background: '#3f1f1f', 
-                color: '#fca5a5', 
-                padding: '1rem', 
+              <pre style={{
+                background: colors.errorBg,
+                color: colors.errorText,
+                padding: '1rem',
                 borderRadius: '8px',
-                border: '1px solid #7f1d1d'
+                border: `1px solid ${colors.errorBorder}`
               }}>
                 {error}
               </pre>
@@ -219,51 +255,51 @@ function App() {
           <div>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
               <h2 style={{ margin: 0 }}>Job Overview — {job.job?.name || 'Unnamed Job'}</h2>
-              <button 
+              <button
                 onClick={() => { setView('home'); setJob(null); setLastReport(null); }}
-                style={{ padding: '0.5rem 1rem', background: '#334155', color: '#fff', border: 'none', borderRadius: '6px' }}
+                style={{ padding: '0.5rem 1rem', background: colors.bgInset, color: colors.text, border: 'none', borderRadius: '6px' }}
               >
                 New Job
               </button>
             </div>
 
             {job.requests.map((request, rIndex) => (
-              <div key={rIndex} style={{ 
-                background: '#1e2937', 
-                border: '1px solid #334155', 
-                borderRadius: '8px', 
+              <div key={rIndex} style={{
+                background: colors.bgElevated,
+                border: `1px solid ${colors.border}`,
+                borderRadius: '8px',
                 marginBottom: '1rem',
                 overflow: 'hidden'
               }}>
-                <div 
+                <div
                   onClick={() => toggleRequest(rIndex)}
-                  style={{ 
-                    padding: '1rem 1.25rem', 
+                  style={{
+                    padding: '1rem 1.25rem',
                     cursor: 'pointer',
                     display: 'flex',
                     justifyContent: 'space-between',
                     alignItems: 'center',
-                    background: '#0f172a'
+                    background: colors.bgInset
                   }}
                 >
                   <div>
                     <strong>{request.name || `Request ${rIndex + 1}`}</strong>
-                    <span style={{ color: '#94a3b8', marginLeft: '1rem' }}>
+                    <span style={{ color: colors.textMuted, marginLeft: '1rem' }}>
                       {request.assets.length} assets
                     </span>
                   </div>
-                  <span style={{ color: '#64748b' }}>{expandedRequests.has(rIndex) ? '−' : '+'}</span>
+                  <span style={{ color: colors.textDim }}>{expandedRequests.has(rIndex) ? '−' : '+'}</span>
                 </div>
 
                 {expandedRequests.has(rIndex) && (
                   <div style={{ padding: '0 1.25rem 1.25rem' }}>
                     {request.assets.map((asset, aIndex) => (
-                      <div 
+                      <div
                         key={aIndex}
                         onClick={() => openAssetDetail(rIndex, aIndex)}
-                        style={{ 
-                          padding: '0.875rem 1rem', 
-                          background: '#334155', 
+                        style={{
+                          padding: '0.875rem 1rem',
+                          background: colors.bgInset,
                           marginTop: '0.5rem',
                           borderRadius: '6px',
                           cursor: 'pointer',
@@ -274,11 +310,11 @@ function App() {
                       >
                         <div>
                           <strong>{asset.name}</strong>
-                          <span style={{ color: '#94a3b8', marginLeft: '0.75rem' }}>
+                          <span style={{ color: colors.textMuted, marginLeft: '0.75rem' }}>
                             {asset.kind} • {asset.width}×{asset.height}
                           </span>
                         </div>
-                        <div style={{ color: '#64748b', fontSize: '0.85rem' }}>{asset.output_path}</div>
+                        <div style={{ color: colors.textDim, fontSize: '0.85rem' }}>{asset.output_path}</div>
                       </div>
                     ))}
                   </div>
@@ -286,13 +322,13 @@ function App() {
               </div>
             ))}
 
-            <button 
-              onClick={handleGenerate} 
+            <button
+              onClick={handleGenerate}
               disabled={isGenerating}
-              style={{ 
+              style={{
                 marginTop: '1.5rem',
                 padding: '0.75rem 2.5rem',
-                background: '#2563eb',
+                background: colors.accent,
                 color: '#fff',
                 border: 'none',
                 borderRadius: '8px',
@@ -304,16 +340,16 @@ function App() {
             </button>
 
             {lastReport && (
-              <div style={{ 
-                marginTop: '2rem', 
-                padding: '1.25rem', 
-                background: lastReport.success ? '#052e16' : '#3f1f1f',
-                border: `1px solid ${lastReport.success ? '#166534' : '#7f1d1d'}`,
+              <div style={{
+                marginTop: '2rem',
+                padding: '1.25rem',
+                background: lastReport.success ? colors.successBg : colors.errorBg,
+                border: `1px solid ${lastReport.success ? colors.successBorder : colors.errorBorder}`,
                 borderRadius: '8px'
               }}>
                 <strong>{lastReport.success ? '✓ Generation successful' : '✕ Generation had errors'}</strong>
                 {lastReport.errors?.length > 0 && (
-                  <div style={{ marginTop: '0.75rem', color: '#fca5a5' }}>
+                  <div style={{ marginTop: '0.75rem', color: colors.errorText }}>
                     {lastReport.errors.join('\n')}
                   </div>
                 )}
@@ -326,31 +362,31 @@ function App() {
         {view === 'detail' && selectedAsset && (
           <div style={{ display: 'flex', gap: '3rem' }}>
             <div style={{ flex: 1 }}>
-              <button 
-                onClick={closeDetail} 
-                style={{ marginBottom: '1.5rem', background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer' }}
+              <button
+                onClick={closeDetail}
+                style={{ marginBottom: '1.5rem', background: 'none', border: 'none', color: colors.textMuted, cursor: 'pointer' }}
               >
                 ← Back to Overview
               </button>
               <h2 style={{ marginTop: 0 }}>Edit Asset</h2>
-              <h3 style={{ color: '#94a3b8', fontWeight: 'normal' }}>{selectedAsset.asset.name}</h3>
+              <h3 style={{ color: colors.textMuted, fontWeight: 'normal' }}>{selectedAsset.asset.name}</h3>
 
               <div style={{ display: 'grid', gap: '1.25rem', maxWidth: 420, marginTop: '1.5rem' }}>
                 <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                  <input 
-                    type="checkbox" 
+                  <input
+                    type="checkbox"
                     checked={selectedAsset.asset.label_enabled ?? true}
                     onChange={(e) => applySafeAdjustment({ label_enabled: e.target.checked })}
-                  /> 
+                  />
                   Show Label
                 </label>
 
                 <div>
                   <label style={{ display: 'block', marginBottom: '0.35rem' }}>Numbering Style</label>
-                  <select 
+                  <select
                     value={selectedAsset.asset.numbering_style || 'zero-padded'}
                     onChange={(e) => applySafeAdjustment({ numbering_style: e.target.value as any })}
-                    style={{ width: '100%', padding: '0.5rem', background: '#1e2937', color: '#fff', border: '1px solid #475569', borderRadius: '6px' }}
+                    style={{ width: '100%', padding: '0.5rem', background: colors.bgElevated, color: colors.text, border: `1px solid ${colors.borderStrong}`, borderRadius: '6px' }}
                   >
                     <option value="zero-padded">Zero-padded (01, 02...)</option>
                     <option value="plain">Plain (1, 2...)</option>
@@ -360,10 +396,10 @@ function App() {
 
                 <div>
                   <label style={{ display: 'block', marginBottom: '0.35rem' }}>Label Position</label>
-                  <select 
+                  <select
                     value={selectedAsset.asset.label_position || 'corners'}
                     onChange={(e) => applySafeAdjustment({ label_position: e.target.value as any })}
-                    style={{ width: '100%', padding: '0.5rem', background: '#1e2937', color: '#fff', border: '1px solid #475569', borderRadius: '6px' }}
+                    style={{ width: '100%', padding: '0.5rem', background: colors.bgElevated, color: colors.text, border: `1px solid ${colors.borderStrong}`, borderRadius: '6px' }}
                   >
                     <option value="corners">Corners</option>
                     <option value="center">Center</option>
@@ -374,11 +410,11 @@ function App() {
 
                 {selectedAsset.asset.kind === 'ui_panel' && (
                   <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                    <input 
+                    <input
                       type="checkbox"
                       checked={selectedAsset.asset.panel_guides ?? false}
                       onChange={(e) => applySafeAdjustment({ panel_guides: e.target.checked })}
-                    /> 
+                    />
                     Show Panel Guides (preview)
                   </label>
                 )}

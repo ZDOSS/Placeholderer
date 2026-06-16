@@ -1,0 +1,38 @@
+#!/usr/bin/env node
+// Node entry point for the Placeholderer CLI.
+// Spawns tsx on the actual TypeScript source so the CLI runs without
+// a separate build step (the user-facing experience is just
+// `placeholderer <command> [args]`). The `tsc` build still runs in CI
+// for type checking.
+
+import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+const target = join(__dirname, '..', 'src', 'index.ts');
+const args = [target, ...process.argv.slice(2)];
+
+// Use the local tsx binary; pnpm symlinks it into node_modules/.bin.
+// On Windows the binary is a .cmd shim, which requires shell:true to
+// spawn under modern Node (the default spawn rejects .cmd/.bat).
+const isWindows = process.platform === 'win32';
+const tsxBin = join(
+  __dirname,
+  '..',
+  'node_modules',
+  '.bin',
+  isWindows ? 'tsx.cmd' : 'tsx'
+);
+
+const child = spawn(tsxBin, args, {
+  stdio: 'inherit',
+  shell: isWindows,
+});
+child.on('exit', (code) => process.exit(code ?? 0));
+child.on('error', (err) => {
+  console.error(`failed to launch tsx at ${tsxBin}:`, err.message);
+  process.exit(1);
+});

@@ -6,13 +6,17 @@ const ALLOWED = /^[a-zA-Z0-9_\-./]+$/;
 
 export function sanitizePath(input: string): string {
   const p = input.trim();
-  if (p.includes('..') || p.startsWith('/') || p.includes(' ')) {
+  if (p === '') return '';
+  // Normalize backslashes to forward slashes BEFORE the regex check,
+  // so a Windows-style path is accepted and cleaned.
+  const normalized = p.replace(/\\/g, '/').replace(/\/+/g, '/');
+  if (normalized.includes('..') || normalized.startsWith('/') || normalized.includes(' ')) {
     throw new Error(`Invalid path: ${input}`);
   }
-  if (!ALLOWED.test(p)) {
+  if (!ALLOWED.test(normalized)) {
     throw new Error(`Invalid characters in path: ${input}`);
   }
-  return p.replace(/\\/g, '/').replace(/\/+/g, '/');
+  return normalized;
 }
 
 export function sanitizeFilename(name: string): string {

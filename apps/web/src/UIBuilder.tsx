@@ -1,153 +1,290 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
+import {
+  type Layer,
+  type RectLayer,
+  type CircleLayer,
+  type LineLayer,
+  type TextLayer,
+  type RasterLayer,
+  type FilledShapeLayer,
+  type BlendMode,
+} from '@placeholderer/schemas';
+import { validateBuilderRecipe } from '@placeholderer/core';
+import { colors } from './colors';
+import { renderLayer, exportSVG, preloadRasterImages, type SupportedExportFormat } from './builderRender';
 
-interface Layer {
-  id: string;
-  type: 'rect' | 'text' | 'raster';
-  name: string;
-  visible: boolean;
-  locked: boolean;
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  color: string;
-  text?: string;
-  imageData?: string;
-  opacity?: number;
-  blendMode?: string;
-}
+const STORAGE_KEY = 'placeholderer:builder';
+const HISTORY_LIMIT = 5;
+const DEFAULT_GRID = 16;
 
-type ResizeHandle = 'left' | 'right' | 'top' | 'bottom' | 'corner' | null;
-
-const presets = [
-  { name: 'Button', type: 'rect', w: 160, h: 48, color: '#4A5568' },
-  { name: 'Panel', type: 'rect', w: 400, h: 240, color: '#2D3748' },
-  { name: 'Title Text', type: 'text', w: 200, h: 40, color: '#ffffff' },
+const BLEND_MODES: BlendMode[] = [
+  'source-over', 'multiply', 'screen', 'overlay', 'darken', 'lighten',
 ];
 
+interface BuilderState {
+  layers: Layer[];
+  width: number;
+  height: number;
+  gridSize: number;
+  snapEnabled: boolean;
+}
+
+function makeId(): string {
+  return Math.random().toString(36).slice(2, 10);
+}
+
+function defaultState(): BuilderState {
+  return {
+    layers: [
+      rectLayer({ name: 'Background', x: 0, y: 0, width: 800, height: 600, fill: '#2D3748', locked: true }),
+    ],
+    width: 800,
+    height: 600,
+    gridSize: DEFAULT_GRID,
+    snapEnabled: true,
+  };
+}
+
+function rectLayer(opts: Partial<RectLayer> & { name: string; x: number; y: number; width: number; height: number; fill?: string }): RectLayer {
+  return {
+    id: makeId(),
+    type: 'rect',
+    visible: true,
+    locked: false,
+    opacity: 1,
+    blendMode: 'source-over',
+    fill: opts.fill ?? '#4A5568',
+    ...opts,
+  };
+}
+
+function circleLayer(opts: Partial<CircleLayer> & { name: string; x: number; y: number; width: number; height: number; fill?: string }): CircleLayer {
+  return {
+    id: makeId(),
+    type: 'circle',
+    visible: true,
+    locked: false,
+    opacity: 1,
+    blendMode: 'source-over',
+    fill: opts.fill ?? '#4A5568',
+    ...opts,
+  };
+}
+
+function lineLayer(opts: Partial<LineLayer> & { name: string; x: number; y: number; width: number; height: number }): LineLayer {
+  return {
+    id: makeId(),
+    type: 'line',
+    visible: true,
+    locked: false,
+    opacity: 1,
+    blendMode: 'source-over',
+    stroke: { color: '#718096', width: 2 },
+    ...opts,
+  };
+}
+
+function textLayer(opts: Partial<TextLayer> & { name: string; x: number; y: number; width: number; height: number; content: string }): TextLayer {
+  return {
+    id: makeId(),
+    type: 'text',
+    visible: true,
+    locked: false,
+    opacity: 1,
+    blendMode: 'source-over',
+    fill: '#ffffff',
+    text: { content: opts.content, fontSize: 24, fontFamily: 'system-ui, sans-serif', align: 'left' },
+    ...opts,
+  };
+}
+
+function rasterLayer(opts: { name: string; x: number; y: number; width: number; height: number; rasterSrc: string }): RasterLayer {
+  return {
+    id: makeId(),
+    type: 'raster',
+    visible: true,
+    locked: false,
+    opacity: 1,
+    blendMode: 'source-over',
+    ...opts,
+  };
+}
+
+function filledShapeLayer(opts: Partial<FilledShapeLayer> & { name: string; x: number; y: number; width: number; height: number; fill?: string }): FilledShapeLayer {
+  return {
+    id: makeId(),
+    type: 'filled-shape',
+    visible: true,
+    locked: false,
+    opacity: 1,
+    blendMode: 'source-over',
+    fill: opts.fill ?? '#4A5568',
+    ...opts,
+  };
+}
+
+function loadFromStorage(): BuilderState | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw) as BuilderState;
+  } catch {
+    return null;
+  }
+}
+
+function saveToStorage(state: BuilderState): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  } catch {
+    // ignore
+  }
+}
+
 export function UIBuilder() {
-  const [layers, setLayers] = useState<Layer[]>([
-    { id: 'bg', type: 'rect', name: 'Background', visible: true, locked: true, x: 0, y: 0, width: 800, height: 600, color: '#2D3748', opacity: 1, blendMode: 'source-over' },
-  ]);
+  const [state, setState] = useState<BuilderState>(() => loadFromStorage() ?? defaultState());
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [isDragging, setIsDragging] = useState(false);
-  const [isResizing, setIsResizing] = useState(false);
-  const [resizeHandle, setResizeHandle] = useState<ResizeHandle>(null);
-  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
+  const [history, setHistory] = useState<BuilderState[]>([]);
+  const [future, setFuture] = useState<BuilderState[]>([]);
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [editingRecipe, setEditingRecipe] = useState(false);
+
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const isInteracting = useRef<{ mode: 'move' | 'resize' | null; resizeHandle?: string; offsetX: number; offsetY: number; startW: number; startH: number; preState: BuilderState | null }>({ mode: null, offsetX: 0, offsetY: 0, startW: 0, startH: 0, preState: null });
 
-  const [canvasSize, setCanvasSize] = useState({ width: 800, height: 600 });
-  const [customWidth, setCustomWidth] = useState(800);
-  const [customHeight, setCustomHeight] = useState(600);
+  // Persist on every state change
+  useEffect(() => { saveToStorage(state); }, [state]);
 
-  // Responsive sizing
+  // Snap helper
+  const snap = useCallback((v: number): number => {
+    if (!state.snapEnabled) return v;
+    return Math.round(v / state.gridSize) * state.gridSize;
+  }, [state.snapEnabled, state.gridSize]);
+
+  // Push to history before mutating
+  const pushHistory = useCallback((next: BuilderState) => {
+    setHistory((h) => {
+      const trimmed = h.length >= HISTORY_LIMIT ? h.slice(1) : h;
+      return [...trimmed, state];
+    });
+    setFuture([]);
+    setState(next);
+  }, [state]);
+
+  const undo = useCallback(() => {
+    if (history.length === 0) return;
+    const prev = history[history.length - 1];
+    setHistory((h) => h.slice(0, -1));
+    setFuture((f) => [state, ...f]);
+    setState(prev);
+  }, [history, state]);
+
+  const redo = useCallback(() => {
+    if (future.length === 0) return;
+    const next = future[0];
+    setFuture((f) => f.slice(1));
+    setHistory((h) => [...h, state]);
+    setState(next);
+  }, [future, state]);
+
+  // Keyboard shortcuts
   useEffect(() => {
-    const updateCanvasSize = () => {
-      if (containerRef.current) {
-        const container = containerRef.current;
-        const availableWidth = Math.max(container.offsetWidth - 60, 600);
-        const availableHeight = Math.max(window.innerHeight - 220, 500);
-
-        const width = Math.min(availableWidth, 1600);
-        const height = Math.min(availableHeight, Math.floor(width * 0.75));
-
-        setCanvasSize({ width: Math.floor(width), height: Math.floor(height) });
+    const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) { e.preventDefault(); undo(); }
+      else if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) { e.preventDefault(); redo(); }
+      else if ((e.key === 'Delete' || e.key === 'Backspace') && selectedId && document.activeElement?.tagName !== 'INPUT' && document.activeElement?.tagName !== 'TEXTAREA') {
+        e.preventDefault();
+        deleteLayer(selectedId);
       }
     };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  });
 
-    updateCanvasSize();
-    window.addEventListener('resize', updateCanvasSize);
-    return () => window.removeEventListener('resize', updateCanvasSize);
-  }, []);
-
-  const selectedLayer = layers.find(l => l.id === selectedId);
-
+  // Render
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const ctx = canvas.getContext('2d')!;
-    
-    // Transparent background for editing view
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    canvas.width = state.width;
+    canvas.height = state.height;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
     // Grid
-    ctx.strokeStyle = '#1e2937';
-    ctx.lineWidth = 1;
-    for (let x = 0; x < canvas.width; x += 16) {
-      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height); ctx.stroke();
-    }
-    for (let y = 0; y < canvas.height; y += 16) {
-      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); ctx.stroke();
+    if (state.gridSize > 0) {
+      ctx.strokeStyle = colors.border;
+      ctx.lineWidth = 1;
+      for (let x = 0; x <= canvas.width; x += state.gridSize) {
+        ctx.beginPath(); ctx.moveTo(x + 0.5, 0); ctx.lineTo(x + 0.5, canvas.height); ctx.stroke();
+      }
+      for (let y = 0; y <= canvas.height; y += state.gridSize) {
+        ctx.beginPath(); ctx.moveTo(0, y + 0.5); ctx.lineTo(canvas.width, y + 0.5); ctx.stroke();
+      }
     }
 
-    layers.forEach(layer => {
-      if (!layer.visible) return;
-      ctx.globalAlpha = layer.opacity ?? 1;
-      ctx.globalCompositeOperation = (layer.blendMode as any) || 'source-over';
-
-      if (layer.type === 'rect') {
-        ctx.fillStyle = layer.color;
-        ctx.fillRect(layer.x, layer.y, layer.width, layer.height);
-        ctx.strokeStyle = '#475569';
-        ctx.strokeRect(layer.x, layer.y, layer.width, layer.height);
-      }
-      if (layer.type === 'text' && layer.text) {
-        ctx.font = 'bold 24px system-ui';
-        ctx.fillStyle = layer.color;
-        ctx.fillText(layer.text, layer.x, layer.y + 24);
-      }
-      if (layer.type === 'raster' && layer.imageData) {
-        const img = new Image();
-        img.onload = () => ctx.drawImage(img, layer.x, layer.y, layer.width, layer.height);
-        img.src = layer.imageData;
-      }
+    state.layers.forEach((layer) => {
+      renderLayer({ ctx, width: state.width, height: state.height }, layer);
     });
 
-    ctx.globalAlpha = 1;
-    ctx.globalCompositeOperation = 'source-over';
-
-    if (selectedLayer) {
-      ctx.strokeStyle = '#3b82f6';
-      ctx.lineWidth = 2;
-      ctx.strokeRect(selectedLayer.x - 2, selectedLayer.y - 2, selectedLayer.width + 4, selectedLayer.height + 4);
+    // Selection outline
+    if (selectedId) {
+      const sel = state.layers.find((l) => l.id === selectedId);
+      if (sel) {
+        const x = sel.x ?? 0;
+        const y = sel.y ?? 0;
+        const w = sel.width ?? 0;
+        const h = sel.height ?? 0;
+        ctx.strokeStyle = colors.accent;
+        ctx.lineWidth = 2;
+        ctx.strokeRect(x - 2, y - 2, w + 4, h + 4);
+      }
     }
-  }, [layers, selectedId, canvasSize]);
+  }, [state, selectedId, colors]);
 
-  const addLayer = (type: 'rect' | 'text' | 'raster', preset?: any) => {
-    const newLayer: Layer = {
-      id: Date.now().toString(),
-      type,
-      name: preset?.name || type.charAt(0).toUpperCase() + type.slice(1),
-      visible: true,
-      locked: false,
-      x: 80 + layers.length * 25,
-      y: 80 + layers.length * 25,
-      width: preset?.w || (type === 'rect' ? 140 : 120),
-      height: preset?.h || (type === 'rect' ? 80 : 40),
-      color: preset?.color || '#4A5568',
-      text: type === 'text' ? 'Text' : undefined,
-      opacity: 1,
-      blendMode: 'source-over',
-    };
-    setLayers([...layers, newLayer]);
-    setSelectedId(newLayer.id);
-  };
-
-  const startFromScratch = () => {
-    setLayers([
-      { id: 'bg', type: 'rect', name: 'Background', visible: true, locked: true, x: 0, y: 0, width: canvasSize.width, height: canvasSize.height, color: '#2D3748', opacity: 1, blendMode: 'source-over' },
-    ]);
-    setSelectedId(null);
+  const addLayer = (factory: () => Layer) => {
+    const layer = factory();
+    pushHistory({ ...state, layers: [...state.layers, layer] });
+    setSelectedId(layer.id);
   };
 
   const updateLayer = (id: string, updates: Partial<Layer>) => {
-    setLayers(layers.map(l => l.id === id ? { ...l, ...updates } : l));
+    pushHistory({
+      ...state,
+      layers: state.layers.map((l) => (l.id === id ? ({ ...l, ...updates } as Layer) : l)),
+    });
   };
 
   const deleteLayer = (id: string) => {
-    setLayers(layers.filter(l => l.id !== id));
+    pushHistory({ ...state, layers: state.layers.filter((l) => l.id !== id) });
     if (selectedId === id) setSelectedId(null);
+  };
+
+  const duplicateLayer = (id: string) => {
+    const layer = state.layers.find((l) => l.id === id);
+    if (!layer) return;
+    const clone: Layer = { ...layer, id: makeId(), name: layer.name + ' copy', x: (layer.x ?? 0) + 16, y: (layer.y ?? 0) + 16 };
+    pushHistory({ ...state, layers: [...state.layers, clone] });
+    setSelectedId(clone.id);
+  };
+
+  const moveLayer = (id: string, direction: 'up' | 'down') => {
+    const idx = state.layers.findIndex((l) => l.id === id);
+    if (idx < 0) return;
+    const swapWith = direction === 'up' ? idx + 1 : idx - 1;
+    if (swapWith < 0 || swapWith >= state.layers.length) return;
+    const layers = [...state.layers];
+    [layers[idx], layers[swapWith]] = [layers[swapWith], layers[idx]];
+    pushHistory({ ...state, layers });
+  };
+
+  const startFromScratch = () => {
+    pushHistory(defaultState());
+    setSelectedId(null);
   };
 
   const importRaster = () => {
@@ -155,372 +292,495 @@ export function UIBuilder() {
     input.type = 'file';
     input.accept = 'image/*';
     input.onchange = (e: any) => {
-      const file = e.target.files[0];
+      const file = e.target.files?.[0];
       if (!file) return;
       const reader = new FileReader();
       reader.onload = (ev) => {
-        const newLayer: Layer = {
-          id: Date.now().toString(),
-          type: 'raster',
+        addLayer(() => rasterLayer({
           name: file.name,
-          visible: true,
-          locked: false,
-          x: 120,
-          y: 120,
-          width: 200,
-          height: 150,
-          color: '#ffffff',
-          imageData: ev.target?.result as string,
-          opacity: 1,
-          blendMode: 'source-over',
-        };
-        setLayers([...layers, newLayer]);
-        setSelectedId(newLayer.id);
+          x: 120, y: 120, width: 200, height: 150,
+          rasterSrc: ev.target?.result as string,
+        }));
       };
       reader.readAsDataURL(file);
     };
     input.click();
   };
 
-  // Export with transparent background
-  const exportPNG = () => {
-    const exportCanvas = document.createElement('canvas');
-    exportCanvas.width = canvasSize.width;
-    exportCanvas.height = canvasSize.height;
-    const ctx = exportCanvas.getContext('2d')!;
-
-    // Transparent background
-    ctx.clearRect(0, 0, exportCanvas.width, exportCanvas.height);
-
-    layers.forEach(layer => {
-      if (!layer.visible) return;
-      ctx.globalAlpha = layer.opacity ?? 1;
-      ctx.globalCompositeOperation = (layer.blendMode as any) || 'source-over';
-
-      if (layer.type === 'rect') {
-        ctx.fillStyle = layer.color;
-        ctx.fillRect(layer.x, layer.y, layer.width, layer.height);
-      }
-      if (layer.type === 'text' && layer.text) {
-        ctx.font = 'bold 24px system-ui';
-        ctx.fillStyle = layer.color;
-        ctx.fillText(layer.text, layer.x, layer.y + 24);
-      }
-      if (layer.type === 'raster' && layer.imageData) {
-        const img = new Image();
-        img.onload = () => {
-          ctx.drawImage(img, layer.x, layer.y, layer.width, layer.height);
-          // Trigger download after image loads
-          const link = document.createElement('a');
-          link.download = 'ui-placeholder.png';
-          link.href = exportCanvas.toDataURL('image/png');
-          link.click();
-        };
-        img.src = layer.imageData;
-        return;
-      }
-    });
-
-    // If no raster layers, download immediately
-    const hasRaster = layers.some(l => l.type === 'raster' && l.visible);
-    if (!hasRaster) {
-      const link = document.createElement('a');
-      link.download = 'ui-placeholder.png';
-      link.href = exportCanvas.toDataURL('image/png');
-      link.click();
+  const exportImage = async (format: SupportedExportFormat) => {
+    if (format === 'svg') {
+      const svg = exportSVG(state.layers, state.width, state.height);
+      const blob = new Blob([svg], { type: 'image/svg+xml' });
+      download(blob, 'ui-placeholder.svg');
+      return;
     }
+    // Wait for any imported raster images to finish loading before
+    // capturing the export. Without this, an imported image is
+    // silently absent from the resulting PNG/JPG because drawRaster
+    // kicks off an async image load and the toBlob call races it.
+    await preloadRasterImages(state.layers);
+    // PNG / JPEG: render to an off-screen canvas (the on-screen canvas
+    // is already showing this state).
+    const canvas = document.createElement('canvas');
+    canvas.width = state.width;
+    canvas.height = state.height;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    if (format === 'jpeg') {
+      // JPEG has no alpha; paint a background first.
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, state.width, state.height);
+    }
+    state.layers.forEach((layer) => renderLayer({ ctx, width: state.width, height: state.height }, layer));
+    const mime = format === 'jpeg' ? 'image/jpeg' : 'image/png';
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, mime));
+    if (blob) download(blob, `ui-placeholder.${format === 'jpeg' ? 'jpg' : 'png'}`);
   };
 
   const exportRecipe = () => {
-    const recipe = { canvasMode: 'compact', width: canvasSize.width, height: canvasSize.height, layers };
+    const recipe = {
+      canvasMode: 'compact',
+      width: state.width,
+      height: state.height,
+      gridSize: state.gridSize,
+      snapEnabled: state.snapEnabled,
+      layers: state.layers,
+    };
     const blob = new Blob([JSON.stringify(recipe, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'builder-recipe.json';
-    a.click();
-    URL.revokeObjectURL(url);
+    download(blob, 'builder-recipe.json');
   };
 
-  const setCanvasDimensions = () => {
-    const newWidth = Math.max(100, Math.min(4000, customWidth));
-    const newHeight = Math.max(100, Math.min(4000, customHeight));
-    
-    setCanvasSize({ width: newWidth, height: newHeight });
-    
-    // Scale background layer if it exists
-    if (layers[0]?.id === 'bg') {
-      updateLayer('bg', { width: newWidth, height: newHeight });
-    }
+  const importRecipe = () => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'application/json,.json';
+    input.onchange = async (e: any) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      try {
+        const text = await file.text();
+        const data = JSON.parse(text);
+        const result = validateBuilderRecipe(data);
+        if (!result.valid) {
+          alert('Invalid recipe: ' + result.errors.map((er: { path: string; message: string }) => `${er.path}: ${er.message}`).join('\n'));
+          return;
+        }
+        const layers = (data.layers ?? []) as Layer[];
+        pushHistory({
+          ...state,
+          width: data.width ?? state.width,
+          height: data.height ?? state.height,
+          gridSize: data.gridSize ?? state.gridSize,
+          snapEnabled: data.snapEnabled ?? state.snapEnabled,
+          layers,
+        });
+        setSelectedId(null);
+        setEditingRecipe(false);
+      } catch (err: any) {
+        alert('Could not parse recipe JSON: ' + err.message);
+      }
+    };
+    input.click();
   };
 
-  // Resize handlers
-  const getResizeHandle = (layer: Layer, mouseX: number, mouseY: number, shiftKey: boolean): ResizeHandle => {
-    if (!shiftKey || !selectedLayer || layer.id !== selectedLayer.id) return null;
-
-    const edgeThreshold = 18;
-    const nearLeft = Math.abs(mouseX - layer.x) < edgeThreshold;
-    const nearRight = Math.abs(mouseX - (layer.x + layer.width)) < edgeThreshold;
-    const nearTop = Math.abs(mouseY - layer.y) < edgeThreshold;
-    const nearBottom = Math.abs(mouseY - (layer.y + layer.height)) < edgeThreshold;
-
-    if (nearLeft && nearTop) return 'corner';
-    if (nearRight && nearBottom) return 'corner';
-    if (nearLeft) return 'left';
-    if (nearRight) return 'right';
-    if (nearTop) return 'top';
-    if (nearBottom) return 'bottom';
-    return null;
+  const clearRecipe = () => {
+    if (!confirm('Discard the current recipe and start over? This cannot be undone.')) return;
+    startFromScratch();
   };
 
-  const handleMouseMove = (e: React.MouseEvent) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-
-    const rect = canvas.getBoundingClientRect();
-    const mouseX = e.clientX - rect.left;
-    const mouseY = e.clientY - rect.top;
-
-    if (isResizing && selectedLayer && selectedId && resizeHandle) {
-      let newX = selectedLayer.x;
-      let newY = selectedLayer.y;
-      let newWidth = selectedLayer.width;
-      let newHeight = selectedLayer.height;
-
-      if (resizeHandle === 'left' || resizeHandle === 'corner') {
-        const newRight = selectedLayer.x + selectedLayer.width;
-        newX = Math.min(mouseX, newRight - 40);
-        newWidth = newRight - newX;
-      }
-      if (resizeHandle === 'right' || resizeHandle === 'corner') {
-        newWidth = Math.max(40, mouseX - selectedLayer.x);
-      }
-      if (resizeHandle === 'top' || resizeHandle === 'corner') {
-        const newBottom = selectedLayer.y + selectedLayer.height;
-        newY = Math.min(mouseY, newBottom - 30);
-        newHeight = newBottom - newY;
-      }
-      if (resizeHandle === 'bottom' || resizeHandle === 'corner') {
-        newHeight = Math.max(30, mouseY - selectedLayer.y);
-      }
-
-      updateLayer(selectedId, { x: newX, y: newY, width: newWidth, height: newHeight });
-      return;
-    }
-
-    if (isDragging && selectedLayer && selectedId) {
-      updateLayer(selectedId, {
-        x: mouseX - dragOffset.x,
-        y: mouseY - dragOffset.y,
-      });
-      return;
-    }
-
-    if (selectedLayer && e.shiftKey) {
-      const handle = getResizeHandle(selectedLayer, mouseX, mouseY, true);
-      
-      if (handle === 'left' || handle === 'right') canvas.style.cursor = 'ew-resize';
-      else if (handle === 'top' || handle === 'bottom') canvas.style.cursor = 'ns-resize';
-      else if (handle === 'corner') canvas.style.cursor = 'nwse-resize';
-      else canvas.style.cursor = 'grab';
-    } else {
-      canvas.style.cursor = 'default';
-    }
+  // Mouse interactions
+  const getMouse = (e: React.MouseEvent) => {
+    const rect = canvasRef.current!.getBoundingClientRect();
+    return { x: e.clientX - rect.left, y: e.clientY - rect.top };
   };
 
   const handleMouseDown = (e: React.MouseEvent) => {
-    const canvas = canvasRef.current;
-    if (!canvas || !selectedLayer) return;
-
-    const rect = canvas.getBoundingClientRect();
-    const mouseX = e.clientX - rect.left;
-    const mouseY = e.clientY - rect.top;
-
-    if (e.shiftKey) {
-      const handle = getResizeHandle(selectedLayer, mouseX, mouseY, true);
-      if (handle) {
-        setIsResizing(true);
-        setResizeHandle(handle);
-        return;
+    const { x: mx, y: my } = getMouse(e);
+    if (e.shiftKey && selectedId) {
+      const sel = state.layers.find((l) => l.id === selectedId);
+      if (sel) {
+        const handle = getResizeHandle(sel, mx, my);
+        if (handle) {
+          isInteracting.current = { mode: 'resize', resizeHandle: handle, offsetX: 0, offsetY: 0, startW: sel.width ?? 0, startH: sel.height ?? 0, preState: state };
+          return;
+        }
       }
     }
+    const hit = [...state.layers].reverse().find((l) => {
+      if (l.locked || !l.visible) return false;
+      const lx = l.x ?? 0, ly = l.y ?? 0, lw = l.width ?? 0, lh = l.height ?? 0;
+      return mx >= lx && mx <= lx + lw && my >= ly && my <= ly + lh;
+    });
+    if (!hit) { setSelectedId(null); return; }
+    setSelectedId(hit.id);
+    isInteracting.current = {
+      mode: 'move',
+      offsetX: mx - (hit.x ?? 0),
+      offsetY: my - (hit.y ?? 0),
+      startW: hit.width ?? 0,
+      startH: hit.height ?? 0,
+      preState: state,
+    };
+  };
 
-    if (
-      mouseX >= selectedLayer.x &&
-      mouseX <= selectedLayer.x + selectedLayer.width &&
-      mouseY >= selectedLayer.y &&
-      mouseY <= selectedLayer.y + selectedLayer.height
-    ) {
-      setIsDragging(true);
-      setDragOffset({ x: mouseX - selectedLayer.x, y: mouseY - selectedLayer.y });
+  const handleMouseMove = (e: React.MouseEvent) => {
+    const { x: mx, y: my } = getMouse(e);
+    const interact = isInteracting.current;
+
+    if (interact.mode === 'move' && selectedId) {
+      const newX = snap(mx - interact.offsetX);
+      const newY = snap(my - interact.offsetY);
+      setState((s) => ({
+        ...s,
+        layers: s.layers.map((l) => l.id === selectedId ? ({ ...l, x: newX, y: newY } as Layer) : l),
+      }));
+      return;
+    }
+    if (interact.mode === 'resize' && selectedId && interact.resizeHandle) {
+      const sel = state.layers.find((l) => l.id === selectedId);
+      if (!sel) return;
+      let { x, y, width, height } = { x: sel.x ?? 0, y: sel.y ?? 0, width: sel.width ?? 0, height: sel.height ?? 0 };
+      const handle = interact.resizeHandle;
+      if (handle === 'left' || handle === 'corner') {
+        const newRight = x + width;
+        x = Math.min(snap(mx), newRight - 8);
+        width = newRight - x;
+      }
+      if (handle === 'right' || handle === 'corner') {
+        width = Math.max(8, snap(mx) - x);
+      }
+      if (handle === 'top' || handle === 'corner') {
+        const newBottom = y + height;
+        y = Math.min(snap(my), newBottom - 8);
+        height = newBottom - y;
+      }
+      if (handle === 'bottom' || handle === 'corner') {
+        height = Math.max(8, snap(my) - y);
+      }
+      setState((s) => ({
+        ...s,
+        layers: s.layers.map((l) => l.id === selectedId ? ({ ...l, x, y, width, height } as Layer) : l),
+      }));
     }
   };
 
   const handleMouseUp = () => {
-    setIsDragging(false);
-    setIsResizing(false);
-    setResizeHandle(null);
+    if (isInteracting.current.mode && isInteracting.current.preState) {
+      // Snapshot the PRE-gesture state into history so undo actually
+      // restores the position the user started from, not the post-drag
+      // position (which is what 'state' holds by now).
+      const pre = isInteracting.current.preState;
+      setHistory((h) => {
+        const trimmed = h.length >= HISTORY_LIMIT ? h.slice(1) : h;
+        return [...trimmed, pre];
+      });
+      setFuture([]);
+    }
+    isInteracting.current = { mode: null, offsetX: 0, offsetY: 0, startW: 0, startH: 0, preState: null };
   };
 
-  const handleCanvasClick = (e: React.MouseEvent) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
+  const selectedLayer = state.layers.find((l) => l.id === selectedId) ?? null;
 
-    const rect = canvas.getBoundingClientRect();
-    const clickX = e.clientX - rect.left;
-    const clickY = e.clientY - rect.top;
-
-    const hitLayer = [...layers].reverse().find(l => 
-      clickX >= l.x && clickX <= l.x + l.width &&
-      clickY >= l.y && clickY <= l.y + l.height
-    );
-
-    if (!hitLayer) {
-      setSelectedId(null);
-      return;
-    }
-
-    if (e.ctrlKey) {
-      const newLayers = layers.filter(l => l.id !== hitLayer.id);
-      setLayers([hitLayer, ...newLayers]);
-      return;
-    }
-    if (e.altKey) {
-      const newLayers = layers.filter(l => l.id !== hitLayer.id);
-      setLayers([...newLayers, hitLayer]);
-      return;
-    }
-
-    setSelectedId(hitLayer.id);
-  };
+  const presets = [
+    { name: 'Button', factory: () => rectLayer({ name: 'Button', x: 100, y: 100, width: 160, height: 48, fill: '#4A5568' }) },
+    { name: 'Panel', factory: () => rectLayer({ name: 'Panel', x: 60, y: 60, width: 400, height: 240, fill: '#2D3748' }) },
+    { name: 'Title Text', factory: () => textLayer({ name: 'Title', x: 100, y: 100, width: 280, height: 40, content: 'Title' }) },
+    { name: 'Circle Badge', factory: () => circleLayer({ name: 'Badge', x: 100, y: 100, width: 96, height: 96, fill: '#4A5568' }) },
+    { name: 'Divider', factory: () => lineLayer({ name: 'Divider', x: 60, y: 200, width: 240, height: 4 }) },
+  ];
 
   return (
-    <div style={{ padding: '1rem', color: '#e2e8f0', height: 'calc(100vh - 140px)' }}>
+    <div style={{ padding: '1rem', color: colors.text, height: 'calc(100vh - 140px)' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
         <h2 style={{ margin: 0 }}>UI Builder</h2>
-        <div style={{ display: 'flex', gap: '0.5rem' }}>
-          <button onClick={startFromScratch} style={{ padding: '0.5rem 1rem', background: '#334155', color: '#fff', border: 'none', borderRadius: '6px' }}>
-            Start from Scratch
-          </button>
-          <button onClick={exportPNG} style={{ padding: '0.5rem 1rem', background: '#2563eb', color: '#fff', border: 'none', borderRadius: '6px' }}>
-            Export PNG
-          </button>
-          <button onClick={exportRecipe} style={{ padding: '0.5rem 1rem', background: '#334155', color: '#fff', border: 'none', borderRadius: '6px' }}>
-            Export Recipe
-          </button>
+        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+          <button onClick={undo} disabled={history.length === 0} style={btnSecondary(colors)}>Undo ({history.length})</button>
+          <button onClick={redo} disabled={future.length === 0} style={btnSecondary(colors)}>Redo ({future.length})</button>
+          <button onClick={startFromScratch} style={btnSecondary(colors)}>Start from Scratch</button>
+          <button onClick={importRecipe} style={btnSecondary(colors)}>Import Recipe</button>
+          <button onClick={exportRecipe} style={btnSecondary(colors)}>Export Recipe</button>
+          <button onClick={() => exportImage('png')} style={btnAccent(colors)}>Export PNG</button>
+          <button onClick={() => exportImage('jpeg')} style={btnAccent(colors)}>Export JPG</button>
+          <button onClick={() => exportImage('svg')} style={btnAccent(colors)}>Export SVG</button>
         </div>
       </div>
 
-      {/* Canvas Size Controls */}
-      <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', marginBottom: '1rem', padding: '0.75rem', background: '#1e2937', borderRadius: '6px' }}>
-        <span style={{ fontSize: '0.9rem', color: '#94a3b8' }}>Canvas Size:</span>
-        <input 
-          type="number" 
-          value={customWidth} 
-          onChange={(e) => setCustomWidth(parseInt(e.target.value) || 100)}
-          style={{ width: '80px', padding: '0.35rem', background: '#0f172a', color: '#fff', border: '1px solid #475569', borderRadius: '4px' }}
-        />
+      <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', marginBottom: '1rem', padding: '0.75rem', background: colors.bgElevated, border: `1px solid ${colors.border}`, borderRadius: '6px', flexWrap: 'wrap' }}>
+        <span style={{ fontSize: '0.9rem', color: colors.textMuted }}>Canvas:</span>
+        <input type="number" value={state.width} onChange={(e) => setState((s) => ({ ...s, width: Math.max(50, parseInt(e.target.value) || 50) }))} style={numInputStyle(colors)} />
         <span>×</span>
-        <input 
-          type="number" 
-          value={customHeight} 
-          onChange={(e) => setCustomHeight(parseInt(e.target.value) || 100)}
-          style={{ width: '80px', padding: '0.35rem', background: '#0f172a', color: '#fff', border: '1px solid #475569', borderRadius: '4px' }}
-        />
-        <button onClick={setCanvasDimensions} style={{ padding: '0.35rem 0.8rem', background: '#2563eb', color: '#fff', border: 'none', borderRadius: '4px' }}>
-          Apply
-        </button>
+        <input type="number" value={state.height} onChange={(e) => setState((s) => ({ ...s, height: Math.max(50, parseInt(e.target.value) || 50) }))} style={numInputStyle(colors)} />
+        <span style={{ fontSize: '0.9rem', color: colors.textMuted, marginLeft: '1rem' }}>Grid:</span>
+        <input type="number" value={state.gridSize} onChange={(e) => setState((s) => ({ ...s, gridSize: Math.max(2, parseInt(e.target.value) || 2) }))} style={numInputStyle(colors)} />
+        <label style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', fontSize: '0.9rem' }}>
+          <input type="checkbox" checked={state.snapEnabled} onChange={(e) => setState((s) => ({ ...s, snapEnabled: e.target.checked }))} />
+          Snap
+        </label>
+        <button onClick={clearRecipe} style={{ ...btnSecondary(colors), marginLeft: 'auto' }}>Clear</button>
       </div>
 
-      <div style={{ display: 'flex', gap: '2rem', height: 'calc(100% - 110px)' }}>
+      <div style={{ display: 'flex', gap: '2rem', height: 'calc(100% - 130px)' }}>
         <div ref={containerRef} style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'flex-start' }}>
           <div>
-            <canvas 
-              ref={canvasRef} 
-              width={canvasSize.width} 
-              height={canvasSize.height}
-              style={{ 
-                border: '1px solid #334155', 
+            <canvas
+              ref={canvasRef}
+              width={state.width}
+              height={state.height}
+              style={{
+                border: `1px solid ${colors.border}`,
                 borderRadius: '8px',
                 cursor: 'default',
-                background: '#0f172a',
+                background: colors.bgInset,
                 maxWidth: '100%',
                 height: 'auto',
-                boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.3)'
+                boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.2)',
               }}
               onMouseDown={handleMouseDown}
               onMouseMove={handleMouseMove}
               onMouseUp={handleMouseUp}
               onMouseLeave={handleMouseUp}
-              onClick={handleCanvasClick}
             />
-            <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '0.5rem' }}>
-              Click to select • Drag to move • <strong>Shift + Drag edge</strong> = Resize • <strong>Ctrl+Click</strong> = Send to back • <strong>Alt+Click</strong> = Send to front
+            <div style={{ fontSize: '0.75rem', color: colors.textDim, marginTop: '0.5rem' }}>
+              Click to select • Drag to move • <strong>Shift + Drag edge</strong> = Resize • <strong>Ctrl/⌘+Z</strong> = Undo • <strong>Delete</strong> = Remove layer
             </div>
           </div>
         </div>
 
-        <div style={{ width: 320, flexShrink: 0 }}>
+        <div style={{ width: 320, flexShrink: 0, overflowY: 'auto' }}>
+          {/* Add controls */}
           <div style={{ marginBottom: '1rem', display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-            <button onClick={() => addLayer('rect')} style={{ padding: '0.4rem 0.8rem', background: '#334155', color: '#fff', border: 'none', borderRadius: '6px' }}>+ Rectangle</button>
-            <button onClick={() => addLayer('text')} style={{ padding: '0.4rem 0.8rem', background: '#334155', color: '#fff', border: 'none', borderRadius: '6px' }}>+ Text</button>
-            <button onClick={importRaster} style={{ padding: '0.4rem 0.8rem', background: '#334155', color: '#fff', border: 'none', borderRadius: '6px' }}>Import Image</button>
+            <button onClick={() => addLayer(() => rectLayer({ name: 'Rectangle', x: 80, y: 80, width: 140, height: 80 }))} style={btnSecondary(colors)}>+ Rect</button>
+            <button onClick={() => addLayer(() => circleLayer({ name: 'Circle', x: 80, y: 80, width: 80, height: 80 }))} style={btnSecondary(colors)}>+ Circle</button>
+            <button onClick={() => addLayer(() => lineLayer({ name: 'Line', x: 80, y: 100, width: 200, height: 4 }))} style={btnSecondary(colors)}>+ Line</button>
+            <button onClick={() => addLayer(() => filledShapeLayer({ name: 'Rounded', x: 80, y: 80, width: 140, height: 80 }))} style={btnSecondary(colors)}>+ Rounded</button>
+            <button onClick={() => addLayer(() => textLayer({ name: 'Text', x: 80, y: 100, width: 200, height: 40, content: 'Text' }))} style={btnSecondary(colors)}>+ Text</button>
+            <button onClick={importRaster} style={btnSecondary(colors)}>Import Image</button>
           </div>
 
+          {/* Presets */}
           <div style={{ marginBottom: '1rem' }}>
-            <div style={{ fontSize: '0.8rem', color: '#64748b', marginBottom: '0.35rem' }}>Presets</div>
-            {presets.map(p => (
-              <button key={p.name} onClick={() => addLayer(p.type as any, p)} style={{ marginRight: '0.4rem', marginBottom: '0.4rem', padding: '0.35rem 0.7rem', background: '#1e2937', color: '#fff', border: '1px solid #475569', borderRadius: '4px', fontSize: '0.85rem' }}>
+            <div style={{ fontSize: '0.8rem', color: colors.textDim, marginBottom: '0.35rem' }}>Presets</div>
+            {presets.map((p) => (
+              <button key={p.name} onClick={() => addLayer(p.factory)} style={{ ...btnSecondary(colors), marginRight: '0.3rem', marginBottom: '0.3rem' }}>
                 {p.name}
               </button>
             ))}
           </div>
 
-          <div>
-            <div style={{ fontSize: '0.8rem', color: '#64748b', marginBottom: '0.5rem' }}>Layers</div>
-            {layers.map(layer => (
-              <div key={layer.id} onClick={() => setSelectedId(layer.id)} style={{ padding: '0.6rem 0.75rem', background: selectedId === layer.id ? '#1e40af' : '#1e2937', marginBottom: '0.25rem', borderRadius: '6px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', fontSize: '0.9rem' }}>
-                <span>{layer.name}</span>
-                <button onClick={(e) => { e.stopPropagation(); deleteLayer(layer.id); }} style={{ background: 'none', border: 'none', color: '#64748b', cursor: 'pointer' }}>×</button>
+          {/* Layers */}
+          <div style={{ marginBottom: '1rem' }}>
+            <div style={{ fontSize: '0.8rem', color: colors.textDim, marginBottom: '0.5rem' }}>Layers</div>
+            {[...state.layers].reverse().map((layer) => (
+              <div key={layer.id} style={{
+                padding: '0.5rem 0.6rem',
+                background: selectedId === layer.id ? colors.accent : colors.bgElevated,
+                color: selectedId === layer.id ? '#fff' : colors.text,
+                marginBottom: '0.25rem',
+                borderRadius: '6px',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                cursor: 'pointer',
+                fontSize: '0.85rem',
+                opacity: layer.visible ? 1 : 0.5,
+              }}>
+                <span onClick={() => setSelectedId(layer.id)} style={{ flex: 1 }}>
+                  {renamingId === layer.id ? (
+                    <input
+                      autoFocus
+                      defaultValue={layer.name}
+                      onBlur={(e) => { updateLayer(layer.id, { name: e.target.value || layer.name }); setRenamingId(null); }}
+                      onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+                      style={{ width: '90%', background: 'transparent', color: 'inherit', border: 'none', outline: 'none' }}
+                    />
+                  ) : (
+                    <span onDoubleClick={() => setRenamingId(layer.id)}>{layer.name}</span>
+                  )}
+                  {' '}
+                  <span style={{ fontSize: '0.75rem', opacity: 0.7 }}>{layer.type}{layer.locked ? ' 🔒' : ''}</span>
+                </span>
+                <span style={{ display: 'flex', gap: '0.2rem' }}>
+                  <IconBtn label="↑" onClick={() => moveLayer(layer.id, 'up')} />
+                  <IconBtn label="↓" onClick={() => moveLayer(layer.id, 'down')} />
+                  <IconBtn label="⎘" onClick={() => duplicateLayer(layer.id)} />
+                  <IconBtn label="×" onClick={() => deleteLayer(layer.id)} />
+                </span>
               </div>
             ))}
           </div>
 
-          {selectedLayer && (
-            <div style={{ marginTop: '1.5rem', padding: '1rem', background: '#1e2937', borderRadius: '8px' }}>
-              <div style={{ fontSize: '0.85rem', color: '#94a3b8', marginBottom: '0.75rem' }}>Properties — {selectedLayer.name}</div>
-              <div style={{ marginBottom: '0.75rem' }}>
-                <label style={{ fontSize: '0.8rem', display: 'block', marginBottom: '0.25rem' }}>Color</label>
-                <input type="color" value={selectedLayer.color} onChange={(e) => updateLayer(selectedLayer.id, { color: e.target.value })} style={{ width: '100%' }} />
-              </div>
-              {selectedLayer.type === 'text' && (
-                <div style={{ marginBottom: '0.75rem' }}>
-                  <label style={{ fontSize: '0.8rem', display: 'block', marginBottom: '0.25rem' }}>Text</label>
-                  <input type="text" value={selectedLayer.text || ''} onChange={(e) => updateLayer(selectedLayer.id, { text: e.target.value })} style={{ width: '100%', padding: '0.4rem', background: '#0f172a', color: '#fff', border: '1px solid #475569', borderRadius: '4px' }} />
-                </div>
-              )}
-              <div style={{ marginBottom: '0.75rem' }}>
-                <label style={{ fontSize: '0.8rem', display: 'block', marginBottom: '0.25rem' }}>Opacity</label>
-                <input type="range" min="0" max="1" step="0.05" value={selectedLayer.opacity ?? 1} onChange={(e) => updateLayer(selectedLayer.id, { opacity: parseFloat(e.target.value) })} style={{ width: '100%' }} />
-              </div>
-              <div>
-                <label style={{ fontSize: '0.8rem', display: 'block', marginBottom: '0.25rem' }}>Blend Mode</label>
-                <select value={selectedLayer.blendMode || 'source-over'} onChange={(e) => updateLayer(selectedLayer.id, { blendMode: e.target.value })} style={{ width: '100%', padding: '0.4rem', background: '#0f172a', color: '#fff', border: '1px solid #475569', borderRadius: '4px' }}>
-                  <option value="source-over">Normal</option>
-                  <option value="multiply">Multiply</option>
-                  <option value="screen">Screen</option>
-                  <option value="overlay">Overlay</option>
-                </select>
-              </div>
-              <div style={{ marginTop: '0.75rem' }}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                  <input type="checkbox" checked={selectedLayer.visible} onChange={(e) => updateLayer(selectedLayer.id, { visible: e.target.checked })} /> Visible
-                </label>
-              </div>
-            </div>
-          )}
+          {/* Properties */}
+          {selectedLayer && <PropertiesPanel layer={selectedLayer} onUpdate={(u) => updateLayer(selectedLayer.id, u)} colors={colors} />}
         </div>
       </div>
     </div>
   );
+}
+
+function getResizeHandle(layer: Layer, mx: number, my: number): string | null {
+  const x = layer.x ?? 0, y = layer.y ?? 0, w = layer.width ?? 0, h = layer.height ?? 0;
+  const T = 8;
+  const nearLeft = Math.abs(mx - x) < T;
+  const nearRight = Math.abs(mx - (x + w)) < T;
+  const nearTop = Math.abs(my - y) < T;
+  const nearBottom = Math.abs(my - (y + h)) < T;
+  if ((nearLeft || nearRight) && (nearTop || nearBottom)) return 'corner';
+  if (nearLeft) return 'left';
+  if (nearRight) return 'right';
+  if (nearTop) return 'top';
+  if (nearBottom) return 'bottom';
+  return null;
+}
+
+function download(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function btnSecondary(colors: typeof import('./colors').colors) {
+  return {
+    padding: '0.4rem 0.8rem',
+    background: colors.bgInset,
+    color: colors.text,
+    border: 'none',
+    borderRadius: '6px',
+    cursor: 'pointer' as const,
+    fontSize: '0.85rem',
+  };
+}
+function btnAccent(colors: typeof import('./colors').colors) {
+  return { ...btnSecondary(colors), background: colors.accent, color: '#fff' };
+}
+function numInputStyle(colors: typeof import('./colors').colors) {
+  return {
+    width: '70px',
+    padding: '0.3rem',
+    background: colors.bgInset,
+    color: colors.text,
+    border: `1px solid ${colors.borderStrong}`,
+    borderRadius: '4px',
+  };
+}
+
+function IconBtn({ label, onClick }: { label: string; onClick: () => void }) {
+  return (
+    <button onClick={onClick} style={{
+      background: 'transparent', border: 'none', color: 'inherit',
+      cursor: 'pointer', padding: '0 0.2rem', fontSize: '0.85rem',
+    }}>{label}</button>
+  );
+}
+
+interface PropertiesPanelProps {
+  layer: Layer;
+  onUpdate: (updates: Partial<Layer>) => void;
+  colors: typeof import('./colors').colors;
+}
+
+function PropertiesPanel({ layer, onUpdate, colors }: PropertiesPanelProps) {
+  const fillColor = typeof layer.fill === 'string' ? layer.fill : '#4A5568';
+  const strokeColor = layer.stroke?.color ?? '';
+  const shadowBlur = layer.effects?.shadow?.blur ?? '';
+  const shadowColor = layer.effects?.shadow?.color ?? '';
+
+  return (
+    <div style={{ marginTop: '1rem', padding: '0.75rem', background: colors.bgElevated, borderRadius: '8px', border: `1px solid ${colors.border}` }}>
+      <div style={{ fontSize: '0.85rem', color: colors.textMuted, marginBottom: '0.6rem' }}>Properties — {layer.name} ({layer.type})</div>
+
+      <Field label="Name">
+        <input value={layer.name} onChange={(e) => onUpdate({ name: e.target.value })} style={inputStyle(colors)} />
+      </Field>
+
+      <Field label="X / Y">
+        <input type="number" value={layer.x ?? 0} onChange={(e) => onUpdate({ x: parseInt(e.target.value) || 0 })} style={inputStyle(colors)} />
+        <input type="number" value={layer.y ?? 0} onChange={(e) => onUpdate({ y: parseInt(e.target.value) || 0 })} style={inputStyle(colors)} />
+      </Field>
+
+      <Field label="Width / Height">
+        <input type="number" value={layer.width ?? 0} onChange={(e) => onUpdate({ width: parseInt(e.target.value) || 0 })} style={inputStyle(colors)} />
+        <input type="number" value={layer.height ?? 0} onChange={(e) => onUpdate({ height: parseInt(e.target.value) || 0 })} style={inputStyle(colors)} />
+      </Field>
+
+      <Field label="Rotation">
+        <input type="number" value={layer.rotation ?? 0} onChange={(e) => onUpdate({ rotation: parseFloat(e.target.value) || 0 })} style={inputStyle(colors)} />
+      </Field>
+
+      <Field label="Fill color">
+        <input type="color" value={fillColor} onChange={(e) => onUpdate({ fill: e.target.value })} style={{ ...inputStyle(colors), padding: 0, height: 28 }} />
+      </Field>
+
+      <Field label="Stroke color">
+        <input type="color" value={strokeColor || '#000000'} onChange={(e) => onUpdate({ stroke: { ...(layer.stroke ?? {}), color: e.target.value } })} style={{ ...inputStyle(colors), padding: 0, height: 28 }} />
+      </Field>
+
+      <Field label="Stroke width">
+        <input type="number" value={layer.stroke?.width ?? 0} min={0} onChange={(e) => onUpdate({ stroke: { ...(layer.stroke ?? {}), color: layer.stroke?.color ?? '#000000', width: parseInt(e.target.value) || 0 } })} style={inputStyle(colors)} />
+      </Field>
+
+      <Field label="Shadow blur">
+        <input type="number" value={shadowBlur} min={0} onChange={(e) => onUpdate({ effects: { ...(layer.effects ?? {}), shadow: { ...(layer.effects?.shadow ?? {}), blur: parseInt(e.target.value) || 0, color: shadowColor || 'rgba(0,0,0,0.5)' } } })} style={inputStyle(colors)} />
+      </Field>
+
+      <Field label="Opacity">
+        <input type="range" min="0" max="1" step="0.05" value={layer.opacity ?? 1} onChange={(e) => onUpdate({ opacity: parseFloat(e.target.value) })} style={{ width: '100%' }} />
+      </Field>
+
+      <Field label="Blend mode">
+        <select value={layer.blendMode ?? 'source-over'} onChange={(e) => onUpdate({ blendMode: e.target.value as BlendMode })} style={inputStyle(colors)}>
+          {BLEND_MODES.map((m) => <option key={m} value={m}>{m}</option>)}
+        </select>
+      </Field>
+
+      {layer.type === 'text' && (
+        <Field label="Text content" wide>
+          <input
+            value={layer.text?.content ?? ''}
+            onChange={(e) => onUpdate({ text: { ...(layer.text ?? { content: '', fontSize: 24 }), content: e.target.value } })}
+            style={inputStyle(colors)}
+          />
+        </Field>
+      )}
+
+      <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginTop: '0.5rem' }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+          <input type="checkbox" checked={layer.visible} onChange={(e) => onUpdate({ visible: e.target.checked })} /> Visible
+        </label>
+        <label style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+          <input type="checkbox" checked={layer.locked} onChange={(e) => onUpdate({ locked: e.target.checked })} /> Locked
+        </label>
+      </div>
+    </div>
+  );
+}
+
+function Field({ label, children, wide }: { label: string; children: React.ReactNode; wide?: boolean }) {
+  return (
+    <div
+      style={{
+        marginBottom: '0.5rem',
+        display: wide ? 'block' : 'grid',
+        gridTemplateColumns: wide ? undefined : '90px 1fr 1fr',
+        gap: '0.3rem',
+        alignItems: 'center',
+      }}
+    >
+      <label style={{ fontSize: '0.75rem', color: colors.textMuted }}>{label}</label>
+      {children}
+    </div>
+  );
+}
+
+function inputStyle(colors: typeof import('./colors').colors) {
+  return {
+    width: '100%',
+    padding: '0.3rem',
+    background: colors.bgInset,
+    color: colors.text,
+    border: `1px solid ${colors.borderStrong}`,
+    borderRadius: '4px',
+  };
 }
