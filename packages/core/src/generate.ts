@@ -15,8 +15,8 @@ import {
   drawTilesetAsset,
   drawUiPanelAsset,
   type DrawContext,
-  type Canvas2D,
 } from './render.js';
+import type { CanvasBackend, CanvasHandle } from './canvas.js';
 
 export interface GenerateResult {
   success: boolean;
@@ -41,24 +41,6 @@ function drawAsset(asset: Asset, dc: DrawContext): void {
   }
 }
 
-async function renderAssetToBlob(asset: Asset): Promise<Blob> {
-  const canvas = new OffscreenCanvas(asset.width, asset.height);
-  const ctx = canvas.getContext('2d');
-  if (!ctx) throw new Error('failed to acquire 2d context');
-  // The DOM OffscreenCanvasRenderingContext2D is structurally a Canvas2D
-  // for the methods we use (we only ever assign string values to
-  // fillStyle/strokeStyle), but TypeScript's structural variance can't
-  // prove that — see the comment on the Canvas2D interface in render.ts.
-  // The tier 2 CLI backend will use @napi-rs/canvas's SKRSContext2D here
-  // with no cast needed once that work lands.
-  drawAsset(asset, {
-    ctx: ctx as unknown as Canvas2D,
-    width: asset.width,
-    height: asset.height,
-  });
-  return canvas.convertToBlob({ type: formatToMime(asset.format) });
-}
-
 function formatToMime(format: Format): string {
   switch (format) {
     case 'jpg':
@@ -72,7 +54,10 @@ function formatToMime(format: Format): string {
   }
 }
 
-export async function generateJob(job: Manifest): Promise<GenerateResult> {
+export async function generateJob(
+  job: Manifest,
+  backend: CanvasBackend
+): Promise<GenerateResult> {
   const zip = new JSZip();
   const errors: string[] = [];
   const seen = new Set<string>();
@@ -92,8 +77,14 @@ export async function generateJob(job: Manifest): Promise<GenerateResult> {
         }
         seen.add(fullPath);
 
-        const blob = await renderAssetToBlob(asset);
-        zip.file(fullPath, blob);
+        const handle = backend.createCanvas(asset.width, asset.height);
+        drawAsset(asset, {
+          ctx: handle.ctx,
+          width: asset.width,
+          height: asset.height,
+        });
+        const bytes = await handle.encode(formatToMime(asset.format));
+        zip.file(fullPath, bytes);
       } catch (err: any) {
         errors.push(`${asset.name}: ${err?.message ?? String(err)}`);
       }

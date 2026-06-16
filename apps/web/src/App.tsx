@@ -1,10 +1,27 @@
 import { useState } from 'react';
-import { validateManifest, generateJob } from '@placeholderer/core';
+import { validateManifest, generateJob, type CanvasBackend, type Canvas2D } from '@placeholderer/core';
 import type { Manifest, Asset, SafeAdjustment } from '@placeholderer/schemas';
 import { AssetPreview } from './AssetPreview';
 import { UIBuilder } from './UIBuilder';
 import { Templates } from './Templates';
 import { CSVImport } from './CSVImport';
+
+// Browser canvas backend: wraps OffscreenCanvas so the shared core
+// can run without knowing it's in a browser.
+const webCanvasBackend: CanvasBackend = {
+  createCanvas(width, height) {
+    const canvas = new OffscreenCanvas(width, height);
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('failed to acquire 2d context');
+    return {
+      ctx: ctx as unknown as Canvas2D,
+      encode: async (mime) => {
+        const blob = await canvas.convertToBlob({ type: mime });
+        return new Uint8Array(await blob.arrayBuffer());
+      },
+    };
+  },
+};
 
 type View = 'home' | 'overview' | 'detail' | 'builder' | 'templates';
 
@@ -90,7 +107,7 @@ function App() {
     if (!job) return;
     setIsGenerating(true);
     try {
-      const result = await generateJob(job);
+      const result = await generateJob(job, webCanvasBackend);
       setLastReport(result);
       
       if (result.success && result.zip) {
