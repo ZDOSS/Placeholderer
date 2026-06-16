@@ -65,8 +65,8 @@
         "format": { "type": "string", "enum": ["png", "jpg", "jpeg", "webp"] },
         "output_path": {
           "type": "string",
-          "pattern": "^[a-zA-Z0-9_\\-./]+$",
-          "description": "Output directory inside the ZIP. Letters, digits, underscore, hyphen, dot, and forward slash only. Use .. for traversal is rejected at generation time."
+          "pattern": "^(?!/|.*\\.\\.)[a-zA-Z0-9_\\-./]*$",
+          "description": "Output directory inside the ZIP. Letters, digits, underscore, hyphen, dot, and forward slash only. Must not start with '/' and must not contain '..'."
         },
         "label_enabled": { "type": "boolean" },
         "numbering_style": { "type": "string", "enum": ["zero-padded", "plain", "none"] },

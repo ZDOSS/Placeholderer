@@ -24,17 +24,18 @@ export type TextAlign = 'start' | 'end' | 'left' | 'right' | 'center';
 
 // The DOM Canvas2D type allows fillStyle/strokeStyle to be a gradient or
 // pattern object as well as a string. We don't pull those DOM-only types
-// into env-agnostic code, so the property is `any` here. The render code
-// only ever assigns string hex values, and never reads the gradient/pattern
-// branches — this is documented in generate.ts at the call site.
+// (CanvasGradient, CanvasPattern) into env-agnostic code; we only ever
+// assign string hex values, so the narrower `string` type is correct.
+// generate.ts uses an `as unknown as Canvas2D` cast at the call site to
+// bridge the structural variance — see the comment there.
 export interface Canvas2D {
-  fillStyle: any;
-  strokeStyle: any;
+  fillStyle: string;
+  strokeStyle: string;
   lineWidth: number;
   font: string;
   textAlign: TextAlign;
   globalAlpha: number;
-  globalCompositeOperation: any;
+  globalCompositeOperation: string;
   fillRect(x: number, y: number, w: number, h: number): void;
   strokeRect(x: number, y: number, w: number, h: number): void;
   fillText(text: string, x: number, y: number, maxWidth?: number): void;
