@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { validateManifest, generateJob, type CanvasBackend, type Canvas2D } from '@placeholderer/core';
+import { validateManifest, generateJob, type CanvasBackend, type Canvas2D, type GenerationReport } from '@placeholderer/core';
 import type { Manifest, Asset, SafeAdjustment } from '@placeholderer/schemas';
 import { AssetPreview } from './AssetPreview';
 import { UIBuilder } from './UIBuilder';
@@ -36,6 +36,7 @@ function App() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [importMode, setImportMode] = useState<'json' | 'csv'>('json');
   const [lastReport, setLastReport] = useState<any>(null);
+  const [manifestReport, setManifestReport] = useState<GenerationReport | null>(null);
   const { theme, toggle: toggleTheme } = useTheme();
 
   const handlePaste = (text: string) => {
@@ -114,6 +115,11 @@ function App() {
         a.download = result.suggestedName ?? 'placeholders.zip';
         a.click();
         URL.revokeObjectURL(url);
+
+        // Pull the embedded manifest report out of the ZIP so the
+        // user can see what was produced. JSZip isn't bundled in the
+        // web app, so we decode the central directory by hand.
+        await loadManifestReport(bytes);
       } else {
         setError(result.errors.join('\n'));
       }
@@ -121,6 +127,48 @@ function App() {
       setError(e.message);
     } finally {
       setIsGenerating(false);
+    }
+  };
+
+  /** Decode the manifest-report.json embedded in the generated ZIP
+   *  without pulling in a full ZIP library on the web side. We only
+   *  support the layout that @placeholderer/core's generateJob
+   *  produces: STORE method, single descriptor, uncompressed entry. */
+  const loadManifestReport = async (bytes: Uint8Array): Promise<void> => {
+    try {
+      // End of central directory record is at the very end.
+      const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+      const eocdSig = view.getUint32(bytes.length - 22, true);
+      if (eocdSig !== 0x06054b50) return;
+      const totalEntries = view.getUint16(bytes.length - 10, true);
+      const cdSize = view.getUint32(bytes.length - 12, true);
+      const cdOffset = view.getUint32(bytes.length - 16, true);
+      const target = '_placeholderer/manifest-report.json';
+      for (let i = 0; i < totalEntries; i++) {
+        const entryOffset = cdOffset + i * 46;
+        const sig = view.getUint32(entryOffset, true);
+        if (sig !== 0x02014b50) return;
+        const nameLen = view.getUint16(entryOffset + 28, true);
+        const extraLen = view.getUint16(entryOffset + 30, true);
+        const commentLen = view.getUint16(entryOffset + 32, true);
+        const localHeaderOffset = view.getUint32(entryOffset + 42, true);
+        const nameStart = entryOffset + 46;
+        const name = new TextDecoder().decode(bytes.subarray(nameStart, nameStart + nameLen));
+        if (name !== target) continue;
+        // Local file header is 30 bytes + name + extra.
+        const localNameLen = view.getUint16(localHeaderOffset + 26, true);
+        const localExtraLen = view.getUint16(localHeaderOffset + 28, true);
+        const dataStart = localHeaderOffset + 30 + localNameLen + localExtraLen;
+        const compMethod = view.getUint16(localHeaderOffset + 8, true);
+        const compSize = view.getUint32(localHeaderOffset + 18, true);
+        if (compMethod !== 0) continue; // not stored; bail
+        const text = new TextDecoder().decode(bytes.subarray(dataStart, dataStart + compSize));
+        setManifestReport(JSON.parse(text) as GenerationReport);
+        return;
+      }
+    } catch {
+      // Manifest is best-effort. A failure here doesn't block the
+      // download or error path.
     }
   };
 
@@ -355,6 +403,52 @@ function App() {
                 )}
               </div>
             )}
+
+            {manifestReport && (
+              <div style={{
+                marginTop: '1.5rem',
+                padding: '1.25rem',
+                background: colors.bgElevated,
+                border: `1px solid ${colors.border}`,
+                borderRadius: '8px',
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+                  <strong>Manifest report</strong>
+                  <button
+                    onClick={() => setManifestReport(null)}
+                    style={{ background: 'none', border: 'none', color: colors.textMuted, cursor: 'pointer' }}
+                  >
+                    ×
+                  </button>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '0.75rem', marginBottom: '0.75rem' }}>
+                  <Stat label="Job" value={manifestReport.jobName || '(unnamed)'} />
+                  <Stat label="Total" value={String(manifestReport.totalAssets)} />
+                  <Stat label="Successful" value={String(manifestReport.successful)} />
+                  <Stat label="Failed" value={String(manifestReport.failed)} />
+                </div>
+                {manifestReport.createdFolders.length > 0 && (
+                  <div style={{ marginBottom: '0.5rem' }}>
+                    <div style={{ fontSize: '0.8rem', color: colors.textMuted, marginBottom: '0.25rem' }}>Folders ({manifestReport.createdFolders.length})</div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.3rem' }}>
+                      {manifestReport.createdFolders.map((f: string) => (
+                        <code key={f} style={{ padding: '0.15rem 0.4rem', background: colors.bgInset, borderRadius: '4px', fontSize: '0.75rem' }}>{f}</code>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {manifestReport.createdFiles.length > 0 && (
+                  <div>
+                    <div style={{ fontSize: '0.8rem', color: colors.textMuted, marginBottom: '0.25rem' }}>Files ({manifestReport.createdFiles.length})</div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.3rem' }}>
+                      {manifestReport.createdFiles.map((f: string) => (
+                        <code key={f} style={{ padding: '0.15rem 0.4rem', background: colors.bgInset, borderRadius: '4px', fontSize: '0.75rem' }}>{f}</code>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
 
@@ -432,6 +526,15 @@ function App() {
         {view === 'builder' && <UIBuilder />}
         {view === 'templates' && <Templates />}
       </div>
+    </div>
+  );
+}
+
+function Stat({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <div style={{ fontSize: '0.75rem', color: '#94a3b8' }}>{label}</div>
+      <div style={{ fontSize: '1.1rem', fontWeight: 500, color: colors.text }}>{value}</div>
     </div>
   );
 }
