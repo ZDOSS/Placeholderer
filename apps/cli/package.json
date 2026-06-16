@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "bin": {
-    "placeholderer": "./dist/index.js"
+    "placeholderer": "./bin/placeholderer"
   },
   "scripts": {
     "build": "tsc",
@@ -13,7 +13,8 @@
   "dependencies": {
     "@placeholderer/core": "workspace:*",
     "@placeholderer/schemas": "workspace:*",
-    "commander": "^12.1.0"
+    "commander": "^12.1.0",
+    "tsx": "^4.19.0"
   },
   "devDependencies": {
     "typescript": "^5.5.0",
