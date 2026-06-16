@@ -11,7 +11,7 @@ import {
 } from '@placeholderer/schemas';
 import { validateBuilderRecipe } from '@placeholderer/core';
 import { colors } from './colors';
-import { renderLayer, exportSVG, preloadRasterImages, type SupportedExportFormat } from './builderRender';
+import { renderLayer, exportSVG, preloadRasterImages, rasterCache, type SupportedExportFormat } from './builderRender';
 import { PRESETS } from './builderPresets';
 
 const STORAGE_KEY = 'placeholderer:builder';
@@ -159,6 +159,37 @@ export function UIBuilder() {
   // Persist on every state change
   useEffect(() => { saveToStorage(state); }, [state]);
 
+  // Tick that increments each time an image fill (or raster layer)
+  // finishes loading. The render effect below depends on this so the
+  // canvas re-draws when the new image becomes available instead of
+  // waiting for the next user interaction.
+  const [preloadTick, setPreloadTick] = useState(0);
+
+  // Preload every image source referenced by the layer stack so the
+  // live preview shows the actual image (not just the fallback fill)
+  // the moment the user picks one. The export path also awaits this
+  // helper; the on-screen render only needs the cache to be warm.
+  useEffect(() => {
+    let cancelled = false;
+    const sources = new Set<string>();
+    for (const layer of state.layers) {
+      if (layer.type === 'raster' && layer.rasterSrc) sources.add(layer.rasterSrc);
+      const fill: any = (layer as any).fill;
+      if (fill && typeof fill === 'object' && fill.type === 'image' && fill.src) {
+        sources.add(fill.src);
+      }
+    }
+    for (const src of sources) {
+      if (rasterCache.has(src)) continue;
+      const img = new Image();
+      img.onload = () => { if (!cancelled) setPreloadTick((t) => t + 1); };
+      img.onerror = () => { if (!cancelled) setPreloadTick((t) => t + 1); };
+      img.src = src;
+      rasterCache.set(src, img);
+    }
+    return () => { cancelled = true; };
+  }, [state.layers]);
+
   // Snap helper
   const snap = useCallback((v: number): number => {
     if (!state.snapEnabled) return v;
@@ -245,7 +276,7 @@ export function UIBuilder() {
         ctx.strokeRect(x - 2, y - 2, w + 4, h + 4);
       }
     }
-  }, [state, selectedId, colors]);
+  }, [state, selectedId, colors, preloadTick]);
 
   const addLayer = (factory: () => Layer) => {
     const layer = factory();

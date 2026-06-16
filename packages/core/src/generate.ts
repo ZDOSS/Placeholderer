@@ -115,13 +115,12 @@ export async function generateJob(
           sidecarPath = safePath ? `${safePath}/${sidecarFile}` : sidecarFile;
         }
 
-        const existingIndex = createdFiles.indexOf(fullPath);
-        if (existingIndex >= 0 || (sidecarPath && createdFiles.includes(sidecarPath))) {
+        // Duplicate check against everything previously committed
+        // in this run.
+        if (createdFiles.includes(fullPath) || (sidecarPath && createdFiles.includes(sidecarPath))) {
           errors.push(`${asset.name}: duplicate output path "${fullPath}"`);
           continue;
         }
-        createdFiles.push(fullPath);
-        if (sidecarPath) createdFiles.push(sidecarPath);
 
         let bytes: Uint8Array;
         if (asset.kind === 'audio') {
@@ -135,7 +134,12 @@ export async function generateJob(
           });
           bytes = await handle.encode(formatToMime(asset.format));
         }
+        // Commit the file to the ZIP, then to the report — only after
+        // a successful write. If zip.file throws or encode rejects,
+        // neither path leaks into the sidecar pass or the report.
         zip.file(fullPath, bytes);
+        createdFiles.push(fullPath);
+        if (sidecarPath) createdFiles.push(sidecarPath);
         successful++;
       } catch (err: any) {
         errors.push(`${asset.name}: ${err?.message ?? String(err)}`);

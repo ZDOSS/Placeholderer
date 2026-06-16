@@ -165,6 +165,79 @@ describe('CLI generate (e2e)', () => {
     }
   });
 
+  it('skips sidecar + report entry when an animated sprite sheet fails', async () => {
+    if (!canRun) return;
+    // Force the second sprite sheet's render to fail by giving it a
+    // backend whose encode() rejects. The first one still succeeds so
+    // the ZIP contains a real sheet and a real manifest report.
+    const realBackend = requireCanvas().nodeCanvasBackend;
+    const realCreate = realBackend.createCanvas.bind(realBackend);
+    let calls = 0;
+    const flakyBackend: typeof realBackend = {
+      createCanvas(width, height) {
+        calls++;
+        if (calls === 2) {
+          // Throw on encode for the second call only.
+          return {
+            ctx: realCreate(width, height).ctx,
+            encode: async () => { throw new Error('forced failure'); },
+          };
+        }
+        return realCreate(width, height);
+      },
+    };
+    const dir = mkdtempSync(join(tmpdir(), 'placeholderer-anim-fail-'));
+    try {
+      const manifest = {
+        schemaVersion: 1,
+        job: { name: 'anim_fail_e2e' },
+        requests: [{
+          name: 'enemies',
+          assets: [
+            {
+              kind: 'sprite_sheet',
+              name: 'good_sheet',
+              width: 64, height: 32, format: 'png',
+              output_path: 'enemies',
+              frame_width: 32, frame_height: 32,
+              rows: 1, columns: 2,
+              frame_duration_ms: 150,
+            },
+            {
+              kind: 'sprite_sheet',
+              name: 'bad_sheet',
+              width: 64, height: 32, format: 'png',
+              output_path: 'enemies',
+              frame_width: 32, frame_height: 32,
+              rows: 1, columns: 2,
+              frame_duration_ms: 200,
+            },
+          ],
+        }],
+      };
+      const result = await generateJob(manifest, flakyBackend);
+      expect(result.success).toBe(false);
+      expect(result.errors.some((e) => e.includes('bad_sheet'))).toBe(true);
+
+      const zip = await JSZip.loadAsync(result.zip!);
+      // The good sheet and its sidecar are present.
+      expect(zip.file('enemies/good_sheet.png')).toBeDefined();
+      expect(zip.file('enemies/good_sheet.animation.json')).toBeDefined();
+      // The bad sheet and its sidecar are NOT in the archive
+      // (JSZip.file returns null for missing entries).
+      expect(zip.file('enemies/bad_sheet.png')).toBeNull();
+      expect(zip.file('enemies/bad_sheet.animation.json')).toBeNull();
+      // The manifest report does not list the failed sheet.
+      const report = JSON.parse(await zip.file('_placeholderer/manifest-report.json')!.async('text'));
+      expect(report.createdFiles).not.toContain('enemies/bad_sheet.png');
+      expect(report.createdFiles).not.toContain('enemies/bad_sheet.animation.json');
+      expect(report.createdFiles).toContain('enemies/good_sheet.png');
+      expect(report.failed).toBe(1);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('generates a WAV audio asset with a valid RIFF header', async () => {
     if (!canRun) return;
     const { generateJob, nodeCanvasBackend } = requireCanvas();

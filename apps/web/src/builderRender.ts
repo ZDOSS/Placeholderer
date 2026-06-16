@@ -274,7 +274,7 @@ function drawText(ctx: CanvasRenderingContext2D, layer: any, x: number, y: numbe
 
 // Cache for raster/image-fill sources so the on-screen render and the
 // export path can both await a fully-loaded image before drawing.
-const rasterCache = new Map<string, HTMLImageElement>();
+export const rasterCache = new Map<string, HTMLImageElement>();
 
 /** Preload all raster sources referenced by the layer stack (raster
  *  layers and image fills). The export path awaits this so PNG/JPG
