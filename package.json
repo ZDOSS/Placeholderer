@@ -13,7 +13,7 @@
     "build": "pnpm -r build",
     "dev": "pnpm --filter web dev",
     "lint": "pnpm -r lint",
-    "test": "pnpm --filter @placeholderer/core test",
+    "test": "pnpm --filter @placeholderer/core test && pnpm --filter cli test",
     "e2e": "playwright test"
   },
   "devDependencies": {

@@ -36,9 +36,15 @@ importers:
       '@types/node':
         specifier: ^20.14.0
         version: 20.19.43
+      jszip:
+        specifier: ^3.10.1
+        version: 3.10.1
       typescript:
         specifier: ^5.5.0
         version: 5.9.3
+      vitest:
+        specifier: ^2.1.0
+        version: 2.1.9(@types/node@20.19.43)(terser@5.48.0)
 
   apps/web:
     dependencies:
