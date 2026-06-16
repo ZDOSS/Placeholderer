@@ -63,7 +63,11 @@
         "width": { "type": "integer", "minimum": 1 },
         "height": { "type": "integer", "minimum": 1 },
         "format": { "type": "string", "enum": ["png", "jpg", "jpeg", "webp"] },
-        "output_path": { "type": "string" },
+        "output_path": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9_\\-./]+$",
+          "description": "Output directory inside the ZIP. Letters, digits, underscore, hyphen, dot, and forward slash only. Use .. for traversal is rejected at generation time."
+        },
         "label_enabled": { "type": "boolean" },
         "numbering_style": { "type": "string", "enum": ["zero-padded", "plain", "none"] },
         "background_color": { "type": "string" },
@@ -75,13 +79,14 @@
     "imageAsset": {
       "allOf": [
         { "$ref": "#/definitions/baseAsset" },
-        { "properties": { "kind": { "const": "image" } } }
+        { "type": "object", "properties": { "kind": { "const": "image" } } }
       ]
     },
     "spriteSheetAsset": {
       "allOf": [
         { "$ref": "#/definitions/baseAsset" },
         {
+          "type": "object",
           "properties": {
             "kind": { "const": "sprite_sheet" },
             "frame_width": { "type": "integer", "minimum": 1 },
@@ -98,6 +103,7 @@
       "allOf": [
         { "$ref": "#/definitions/baseAsset" },
         {
+          "type": "object",
           "properties": {
             "kind": { "const": "tileset" },
             "tile_width": { "type": "integer", "minimum": 1 },
@@ -111,6 +117,7 @@
       "allOf": [
         { "$ref": "#/definitions/baseAsset" },
         {
+          "type": "object",
           "properties": {
             "kind": { "const": "ui_panel" },
             "frame_style": { "type": "string", "enum": ["simple", "beveled", "inset", "outlined"] },

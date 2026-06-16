@@ -2,6 +2,7 @@ import JSZip from 'jszip';
 import type {
   Manifest,
   Asset,
+  Format,
   ImageAsset,
   SpriteSheetAsset,
   TilesetAsset,
@@ -44,7 +45,20 @@ async function renderAssetToBlob(asset: Asset): Promise<Blob> {
   const ctx = canvas.getContext('2d');
   if (!ctx) throw new Error('failed to acquire 2d context');
   drawAsset(asset, { ctx, width: asset.width, height: asset.height });
-  return canvas.convertToBlob({ type: 'image/png' });
+  return canvas.convertToBlob({ type: formatToMime(asset.format) });
+}
+
+function formatToMime(format: Format): string {
+  switch (format) {
+    case 'jpg':
+    case 'jpeg':
+      return 'image/jpeg';
+    case 'webp':
+      return 'image/webp';
+    case 'png':
+    default:
+      return 'image/png';
+  }
 }
 
 export async function generateJob(job: Manifest): Promise<GenerateResult> {

@@ -4,9 +4,13 @@
 // satisfy this shape for the methods we use.
 //
 // We define our own minimal interface (rather than relying on the DOM
-// CanvasRenderingContext2D) because OffscreenCanvasRenderingContext2D
-// doesn't expose every method on the DOM type, and node-canvas exposes
-// a similar but not identical set.
+// CanvasRenderingContext2D) because:
+//   - OffscreenCanvasRenderingContext2D doesn't expose every method on
+//     the DOM type.
+//   - node-canvas exposes a similar but not identical set.
+//   - The DOM types (CanvasGradient, CanvasTextAlign, etc.) live in
+//     lib.dom.d.ts, which is a browser-only type library that should
+//     not leak into env-agnostic code.
 
 import type {
   ImageAsset,
@@ -16,14 +20,21 @@ import type {
   LabelPosition,
 } from '@placeholderer/schemas';
 
+export type TextAlign = 'start' | 'end' | 'left' | 'right' | 'center';
+
+// The DOM Canvas2D type allows fillStyle/strokeStyle to be a gradient or
+// pattern object as well as a string. We don't pull those DOM-only types
+// into env-agnostic code, so the property is `any` here. The render code
+// only ever assigns string hex values, and never reads the gradient/pattern
+// branches — this is documented in generate.ts at the call site.
 export interface Canvas2D {
-  fillStyle: string | CanvasGradient | CanvasPattern;
-  strokeStyle: string | CanvasGradient | CanvasPattern;
+  fillStyle: any;
+  strokeStyle: any;
   lineWidth: number;
   font: string;
-  textAlign: CanvasTextAlign;
+  textAlign: TextAlign;
   globalAlpha: number;
-  globalCompositeOperation: GlobalCompositeOperation;
+  globalCompositeOperation: any;
   fillRect(x: number, y: number, w: number, h: number): void;
   strokeRect(x: number, y: number, w: number, h: number): void;
   fillText(text: string, x: number, y: number, maxWidth?: number): void;
@@ -65,11 +76,14 @@ function drawAssetLabel(
     drawLabel(ctx, text, w - 30, 28, w - 60);
     drawLabel(ctx, text, 30, h - 20, w - 60);
     drawLabel(ctx, text, w - 30, h - 20, w - 60);
-  } else if (pos === 'center') {
+  } else if (pos === 'top-center') {
+    drawLabel(ctx, text, w / 2, 28, w - 40);
+  } else if (pos === 'bottom-center') {
+    drawLabel(ctx, text, w / 2, h - 20, w - 40);
+  } else {
+    // 'center' and any unknown future value
     drawLabel(ctx, text, w / 2, h / 2, w - 40);
   }
-  // 'top-center' and 'bottom-center' are accepted by the schema; the
-  // browser preview and CLI both render them in a follow-up pass.
 }
 
 export function drawImageAsset(dc: DrawContext, asset: ImageAsset): void {
@@ -89,10 +103,13 @@ export function drawImageAsset(dc: DrawContext, asset: ImageAsset): void {
 
 export function drawSpriteSheetAsset(dc: DrawContext, asset: SpriteSheetAsset): void {
   const { ctx, width: w, height: h } = dc;
-  const fw = asset.frame_width;
-  const fh = asset.frame_height;
-  const cols = asset.columns;
-  const rows = asset.rows;
+  // Defaults are applied here (not just at the schema layer) so non-AJV
+  // callers — e.g. the CSV import path — produce a usable sprite sheet
+  // even when frame_width/frame_height/rows/columns are missing.
+  const fw = asset.frame_width || 64;
+  const fh = asset.frame_height || 64;
+  const cols = asset.columns || 4;
+  const rows = asset.rows || 2;
 
   ctx.fillStyle = asset.background_color || '#2D3748';
   ctx.fillRect(0, 0, w, h);
