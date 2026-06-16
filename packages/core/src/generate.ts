@@ -8,7 +8,7 @@ import type {
   TilesetAsset,
   UiPanelAsset,
 } from '@placeholderer/schemas';
-import { sanitizePath, sanitizeFilename } from './path';
+import { sanitizePath, sanitizeFilename } from './path.js';
 import {
   drawImageAsset,
   drawSpriteSheetAsset,
@@ -16,7 +16,7 @@ import {
   drawUiPanelAsset,
   type DrawContext,
   type Canvas2D,
-} from './render';
+} from './render.js';
 
 export interface GenerateResult {
   success: boolean;
