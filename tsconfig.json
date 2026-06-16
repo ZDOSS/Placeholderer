@@ -1,16 +1,8 @@
 {
-  "compilerOptions": {
-    "target": "ES2022",
-    "module": "ESNext",
-    "moduleResolution": "bundler",
-    "strict": true,
-    "esModuleInterop": true,
-    "skipLibCheck": true,
-    "forceConsistentCasingInFileNames": true,
-    "resolveJsonModule": true
-  },
+  "files": [],
   "references": [
-    { "path": "./packages/schemas" }
-  ],
-  "exclude": ["node_modules", "dist"]
+    { "path": "./packages/schemas" },
+    { "path": "./packages/core" },
+    { "path": "./apps/cli" }
+  ]
 }
