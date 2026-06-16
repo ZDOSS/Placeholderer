@@ -12,6 +12,7 @@ import {
 import { validateBuilderRecipe } from '@placeholderer/core';
 import { colors } from './colors';
 import { renderLayer, exportSVG, preloadRasterImages, type SupportedExportFormat } from './builderRender';
+import { PRESETS } from './builderPresets';
 
 const STORAGE_KEY = 'placeholderer:builder';
 const HISTORY_LIMIT = 5;
@@ -481,13 +482,22 @@ export function UIBuilder() {
 
   const selectedLayer = state.layers.find((l) => l.id === selectedId) ?? null;
 
-  const presets = [
-    { name: 'Button', factory: () => rectLayer({ name: 'Button', x: 100, y: 100, width: 160, height: 48, fill: '#4A5568' }) },
-    { name: 'Panel', factory: () => rectLayer({ name: 'Panel', x: 60, y: 60, width: 400, height: 240, fill: '#2D3748' }) },
-    { name: 'Title Text', factory: () => textLayer({ name: 'Title', x: 100, y: 100, width: 280, height: 40, content: 'Title' }) },
-    { name: 'Circle Badge', factory: () => circleLayer({ name: 'Badge', x: 100, y: 100, width: 96, height: 96, fill: '#4A5568' }) },
-    { name: 'Divider', factory: () => lineLayer({ name: 'Divider', x: 60, y: 200, width: 240, height: 4 }) },
-  ];
+  // Engine-aware presets grouped by engine for the preset picker.
+  const presets = PRESETS.map((p) => ({
+    name: p.name,
+    engine: p.engine,
+    factory: () => {
+      // Apply the preset: replace the canvas size and append the
+      // preset's layers to the current stack.
+      const layers: Layer[] = p.layers.map((l) => ({ ...l, id: makeId() }));
+      pushHistory({
+        ...state,
+        width: p.width,
+        height: p.height,
+        layers: [...state.layers, ...layers],
+      });
+    },
+  }));
 
   return (
     <div style={{ padding: '1rem', color: colors.text, height: 'calc(100vh - 140px)' }}>
@@ -557,14 +567,27 @@ export function UIBuilder() {
             <button onClick={importRaster} style={btnSecondary(colors)}>Import Image</button>
           </div>
 
-          {/* Presets */}
+          {/* Presets, grouped by engine */}
           <div style={{ marginBottom: '1rem' }}>
             <div style={{ fontSize: '0.8rem', color: colors.textDim, marginBottom: '0.35rem' }}>Presets</div>
-            {presets.map((p) => (
-              <button key={p.name} onClick={() => addLayer(p.factory)} style={{ ...btnSecondary(colors), marginRight: '0.3rem', marginBottom: '0.3rem' }}>
-                {p.name}
-              </button>
-            ))}
+            {(['Godot', 'Unity', 'Unreal', 'Common'] as const).map((engine) => {
+              const enginePresets = presets.filter((p) => p.engine === engine);
+              if (enginePresets.length === 0) return null;
+              return (
+                <div key={engine} style={{ marginBottom: '0.4rem' }}>
+                  <div style={{ fontSize: '0.7rem', color: colors.textDim, marginBottom: '0.2rem' }}>{engine}</div>
+                  {enginePresets.map((p) => (
+                    <button
+                      key={p.name}
+                      onClick={p.factory}
+                      style={{ ...btnSecondary(colors), marginRight: '0.25rem', marginBottom: '0.25rem', fontSize: '0.8rem' }}
+                    >
+                      {p.name}
+                    </button>
+                  ))}
+                </div>
+              );
+            })}
           </div>
 
           {/* Layers */}
