@@ -13,7 +13,7 @@
     "build": "pnpm -r build",
     "dev": "pnpm --filter web dev",
     "lint": "pnpm -r lint",
-    "test": "pnpm -r test"
+    "test": "pnpm --filter @placeholderer/core test"
   },
   "devDependencies": {
     "typescript": "^5.5.0"
