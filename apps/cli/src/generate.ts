@@ -10,7 +10,7 @@ import { CliError, ExitCode } from './errors.js';
 
 export interface GenerateFlags {
   in: string;
-  out: string;
+  out?: string;
   json?: boolean;
   quiet?: boolean;
 }
@@ -20,13 +20,8 @@ export async function runGenerate(flags: GenerateFlags): Promise<void> {
     printError({ json: !!flags.json, quiet: !!flags.quiet }, 'missing --in <file>');
     throw new CliError(ExitCode.Usage, 'missing --in');
   }
-  if (!flags.out) {
-    printError({ json: !!flags.json, quiet: !!flags.quiet }, 'missing --out <file>');
-    throw new CliError(ExitCode.Usage, 'missing --out');
-  }
 
   const inPath = resolve(flags.in);
-  const outPath = resolve(flags.out);
 
   let raw: string;
   try {
@@ -75,6 +70,11 @@ export async function runGenerate(flags: GenerateFlags): Promise<void> {
     throw new CliError(ExitCode.Generation, 'generation failed');
   }
 
+  // Default to the core's suggested name (sanitized job.name + .zip).
+  const outPath = flags.out
+    ? resolve(flags.out)
+    : resolve(result.suggestedName ?? 'placeholders.zip');
+
   try {
     await writeFile(outPath, result.zip);
   } catch (err: any) {
@@ -84,7 +84,7 @@ export async function runGenerate(flags: GenerateFlags): Promise<void> {
   }
 
   if (isJsonMode(flags)) {
-    printJson({ ok: true, output: outPath });
+    printJson({ ok: true, output: outPath, suggestedName: result.suggestedName });
   } else if (!isQuietMode(flags)) {
     printHuman({ json: false, quiet: false }, `✓ wrote ${outPath}`);
   }

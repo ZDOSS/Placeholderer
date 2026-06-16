@@ -30,10 +30,10 @@ program
   .command('generate')
   .description('Generate a ZIP of placeholder assets from a manifest.')
   .requiredOption('--in <file>', 'path to manifest')
-  .requiredOption('--out <file>', 'path to output ZIP')
+  .option('--out <file>', 'path to output ZIP (default: sanitized job.name + .zip)')
   .option('--json', 'emit machine-readable JSON output')
   .option('--quiet', 'suppress non-error output')
-  .action(async (opts: { in: string; out: string; json?: boolean; quiet?: boolean }) => {
+  .action(async (opts: { in: string; out?: string; json?: boolean; quiet?: boolean }) => {
     await runGenerate({
       in: opts.in,
       out: opts.out,

@@ -118,7 +118,7 @@ function App() {
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `${job.job?.name || 'placeholders'}.zip`;
+        a.download = result.suggestedName ?? 'placeholders.zip';
         a.click();
         URL.revokeObjectURL(url);
       } else {
