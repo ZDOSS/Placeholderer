@@ -7,6 +7,7 @@
 import { describe, it, expect } from 'vitest';
 import { PRESETS } from '../../web/src/builderPresets.js';
 import { exportSVG } from '../../web/src/builderRender.js';
+import { hexToRgba } from '../../web/src/UIBuilder.js';
 import type { Layer } from '@placeholderer/schemas';
 
 describe('UI Builder presets', () => {
@@ -50,5 +51,36 @@ describe('exportSVG', () => {
     // The same layer's stroke must be exported as a stroke-bearing
     // (but fill="none") rect on top of the clipped image.
     expect(svg).toMatch(/fill="none" stroke="#FF0000" stroke-width="3"/);
+  });
+});
+
+describe('hexToRgba', () => {
+  // Regression for Greptile round 8: the previous regex grabbed
+  // the blue channel from rgb(10,20,30) and treated it as alpha,
+  // producing rgba(...,...,...,30) — outside the valid 0..1 range.
+
+  it('uses the default alpha for rgb() without an alpha component', () => {
+    const out = hexToRgba('#112233', 'rgb(10,20,30)');
+    expect(out).toBe('rgba(17,34,51,0.6)');
+  });
+
+  it('preserves alpha for rgba() with a 4th component', () => {
+    const out = hexToRgba('#112233', 'rgba(10,20,30,0.42)');
+    expect(out).toBe('rgba(17,34,51,0.42)');
+  });
+
+  it('preserves alpha = 0', () => {
+    const out = hexToRgba('#445566', 'rgba(255,0,0,0)');
+    expect(out).toBe('rgba(68,85,102,0)');
+  });
+
+  it('parses hsla() colors', () => {
+    const out = hexToRgba('#778899', 'hsla(120,50%,50%,0.75)');
+    expect(out).toBe('rgba(119,136,153,0.75)');
+  });
+
+  it('falls back to default alpha when existing is undefined', () => {
+    const out = hexToRgba('#aabbcc', undefined);
+    expect(out).toBe('rgba(170,187,204,0.6)');
   });
 });

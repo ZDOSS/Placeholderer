@@ -942,7 +942,7 @@ function glowColorToHex(color: string | undefined): string {
 
 /** Convert a hex color picked by the native input to an rgba string,
  *  preserving the alpha of an existing glow color when present. */
-function hexToRgba(hex: string, existing: string | undefined): string {
+export function hexToRgba(hex: string, existing: string | undefined): string {
   const m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex);
   if (!m) return existing ?? 'rgba(255,255,255,0.6)';
   const r = parseInt(m[1], 16), g = parseInt(m[2], 16), b = parseInt(m[3], 16);
