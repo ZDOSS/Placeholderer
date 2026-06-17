@@ -467,7 +467,7 @@ function buildSVGFill(layer: Layer): SVGFillSpec | null {
  *  or its type can't be expressed as a clipPath (text, line, raster).
  *  When returned, the caller's markup should be replaced by the
  *  pair: a <g clip-path="..."> containing the <image>. */
-function buildSVGClipAndImage(layer: Layer): { clipDef: string; imageMarkup: string } | null {
+function buildSVGClipAndImage(layer: Layer): { clipId: string; clipDef: string; imageMarkup: string } | null {
   const fill: any = layer.fill;
   if (!fill || typeof fill === 'string' || fill.type !== 'image' || fill.mode !== 'stretch') return null;
   const x = layer.x ?? 0;
@@ -476,7 +476,7 @@ function buildSVGClipAndImage(layer: Layer): { clipDef: string; imageMarkup: str
   const h = layer.height ?? 0;
   if (w <= 0 || h <= 0) return null;
 
-  const clipId = safeId(`clip-${layer.id}`);
+  const clipId = clipIdFor(layer);
   let shapeDef: string;
   switch (layer.type) {
     case 'rect':
@@ -500,7 +500,15 @@ function buildSVGClipAndImage(layer: Layer): { clipDef: string; imageMarkup: str
   }
   const clipDef = `<clipPath id="${clipId}">${shapeDef}</clipPath>`;
   const imageMarkup = `<image href="${escapeXML(fill.src ?? '')}" x="${x}" y="${y}" width="${w}" height="${h}"/>`;
-  return { clipDef, imageMarkup };
+  return { clipId, clipDef, imageMarkup };
+}
+
+/** Single source of truth for a stretch-image-fill clip path id.
+ *  Both the <clipPath> definition and the `clip-path="url(#...)"`
+ *  reference must call this so they stay in sync for any
+ *  layer.id (including numeric ones that safeId() rewrites). */
+function clipIdFor(layer: Layer): string {
+  return safeId(`clip-${layer.id}`);
 }
 
 /** Sanitize an SVG element/attribute id. SVG id values must start
@@ -545,9 +553,10 @@ function layerToSVG(layer: Layer): { markup: string; filter: FilterSpec | null; 
   if (clipImage) {
     // The shape itself is hidden; the clipped <image> replaces it.
     // Apply opacity/transform via a wrapper <g> so the clip stays
-    // in shape-local coordinates.
-    const clipId = `clip-${safeId(layer.id)}`;
-    const g = `<g${opacity}${transform}${filterAttr} clip-path="url(#${clipId})">${clipImage.imageMarkup}</g>`;
+    // in shape-local coordinates. The clip id comes from the same
+    // helper that produced the <clipPath> def, so numeric layer
+    // ids can never desync the two.
+    const g = `<g${opacity}${transform}${filterAttr} clip-path="url(#${clipImage.clipId})">${clipImage.imageMarkup}</g>`;
     return { markup: `  ${g}`, filter, fill: null, clipDef: clipImage.clipDef };
   }
 

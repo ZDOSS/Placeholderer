@@ -134,6 +134,10 @@ function App() {
           // Manifest is best-effort.
         }
       } else {
+        // Surface the new error but also wipe any stale report so
+        // the user can't see the previous job's folders/files
+        // alongside the new error state.
+        setManifestReport(null);
         setError(result.errors.join('\n'));
       }
     } catch (e: any) {
