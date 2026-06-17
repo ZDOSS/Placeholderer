@@ -596,12 +596,12 @@ function layerToSVG(layer: Layer): { markup: string; filter: FilterSpec | null; 
     const align = layer.text?.align ?? 'left';
     const textAnchor = align === 'center' ? 'middle' : align === 'right' ? 'end' : 'start';
     const textX = align === 'center' ? x + w / 2 : align === 'right' ? x + w : x;
-    // Background image + glyphs on top in white. The background
-    // uses the layer's id for the image href id (no <pattern>/
-    // <clipPath> needed because a stretched image fits exactly).
+    // Apply opacity/transform/filter to the wrapping <g> so the
+    // filter affects both the background image and the glyphs
+    // (canvas applyGlow/applyShadow apply to the whole context).
     const bg = `<image href="${escapeXML(textImageFill.src)}" x="${x}" y="${y}" width="${w}" height="${h}"/>`;
-    const fg = `<text x="${textX}" y="${y + fontSize}"${opacity}${transform}${filterAttr} fill="#ffffff" font-family="${escapeXML(fontFamily)}" font-size="${fontSize}" font-weight="bold" text-anchor="${textAnchor}">${content}</text>`;
-    const g = `<g>${bg}${fg}</g>`;
+    const fg = `<text x="${textX}" y="${y + fontSize}" fill="#ffffff" font-family="${escapeXML(fontFamily)}" font-size="${fontSize}" font-weight="bold" text-anchor="${textAnchor}">${content}</text>`;
+    const g = `<g${opacity}${transform}${filterAttr}>${bg}${fg}</g>`;
     return { markup: `  ${g}`, filter, fill: null };
   }
 
@@ -629,7 +629,10 @@ function layerToSVG(layer: Layer): { markup: string; filter: FilterSpec | null; 
       const textAnchor = align === 'center' ? 'middle' : align === 'right' ? 'end' : 'start';
       const textX = align === 'center' ? x + w / 2 : align === 'right' ? x + w : x;
       const markup = `  <text x="${textX}" y="${y + fontSize}"${strokeAttr}${opacity}${transform}${filterAttr} ${fillRef} font-family="${escapeXML(fontFamily)}" font-size="${fontSize}" font-weight="bold" text-anchor="${textAnchor}">${content}</text>`;
-      return { markup, filter: null, fill: fillDef };
+      // Return the filter spec so its <filter> def lands in <defs>.
+      // Previously this returned `filter: null`, which made the
+      // filter URL reference a missing def (T-Rex round 10).
+      return { markup, filter, fill: fillDef };
     }
     case 'raster': {
       const markup = layer.rasterSrc

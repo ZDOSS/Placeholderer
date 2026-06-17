@@ -126,3 +126,44 @@ describe('exportSVG text stretch image fills', () => {
     expect(svg).toMatch(/<text[^>]*fill="#ff0000"/);
   });
 });
+
+describe('exportSVG effect filter defs', () => {
+  // Regression for Greptile round 10: text layers with glow/shadow
+  // referenced a filter URL but the <filter> def wasn't included
+  // in <defs>, because the 'text' case in layerToSVG was returning
+  // `filter: null` even though `filterAttr` was on the markup.
+
+  it('includes the glow filter def when text has a glow', () => {
+    const layer: Layer = {
+      id: 't3',
+      type: 'text',
+      name: 'glow',
+      visible: true,
+      locked: false,
+      x: 0, y: 0, width: 200, height: 60,
+      fill: '#ff0000',
+      text: { content: 'Glow' },
+      effects: { glow: { blur: 12, color: 'rgba(255,255,255,0.6)' } },
+    };
+    const svg = exportSVG([layer], 300, 100);
+    expect(svg).toMatch(/<filter id="f-t3-glow"/);
+    expect(svg).toMatch(/filter="url\(#f-t3-glow\)"/);
+  });
+
+  it('includes the shadow filter def when text has a shadow', () => {
+    const layer: Layer = {
+      id: 't4',
+      type: 'text',
+      name: 'shadow',
+      visible: true,
+      locked: false,
+      x: 0, y: 0, width: 200, height: 60,
+      fill: '#ff0000',
+      text: { content: 'Shadow' },
+      effects: { shadow: { blur: 8, color: 'rgba(0,0,0,0.5)' } },
+    };
+    const svg = exportSVG([layer], 300, 100);
+    expect(svg).toMatch(/<filter id="f-t4-shadow"/);
+    expect(svg).toMatch(/filter="url\(#f-t4-shadow\)"/);
+  });
+});
