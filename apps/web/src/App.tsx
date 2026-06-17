@@ -101,6 +101,10 @@ function App() {
   const handleGenerate = async () => {
     if (!job) return;
     setIsGenerating(true);
+    // Drop any report from a previous successful generation so the
+    // user can't see stale folders/files when the new generation
+    // fails or produces a different job.
+    setManifestReport(null);
     try {
       const result = await generateJob(job, webCanvasBackend);
       setLastReport(result);
