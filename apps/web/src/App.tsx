@@ -46,6 +46,10 @@ function App() {
       const result = validateManifest(parsed);
 
       if (result.valid) {
+        // Clear any report from the previous job so the user
+        // doesn't see stale folders/files alongside the new
+        // manifest's overview.
+        setManifestReport(null);
         setJob(parsed as Manifest);
         setView('overview');
         setError(null);
@@ -59,6 +63,7 @@ function App() {
   };
 
   const handleCSVImport = (data: any) => {
+    setManifestReport(null);
     setJob(data);
     setView('overview');
   };
@@ -279,7 +284,7 @@ function App() {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
               <h2 style={{ margin: 0 }}>Job Overview — {job.job?.name || 'Unnamed Job'}</h2>
               <button
-                onClick={() => { setView('home'); setJob(null); setLastReport(null); }}
+                onClick={() => { setView('home'); setJob(null); setLastReport(null); setManifestReport(null); }}
                 style={{ padding: '0.5rem 1rem', background: colors.bgInset, color: colors.text, border: 'none', borderRadius: '6px' }}
               >
                 New Job
