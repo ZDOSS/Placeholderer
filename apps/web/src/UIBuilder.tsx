@@ -946,10 +946,22 @@ function hexToRgba(hex: string, existing: string | undefined): string {
   const m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex);
   if (!m) return existing ?? 'rgba(255,255,255,0.6)';
   const r = parseInt(m[1], 16), g = parseInt(m[2], 16), b = parseInt(m[3], 16);
-  const a = existing && /[\d.]+\s*\)\s*$/.test(existing)
-    ? existing.match(/[\d.]+\s*\)/)![0].replace(')', '')
-    : '0.6';
-  return `rgba(${r},${g},${b},${a})`;
+  // Only carry the alpha forward when the existing color is a
+  // true rgba(...)/hsla(...) value with a 4th component. For
+  // rgb(...) / hsl(...) / hex without alpha, the regex would
+  // otherwise grab the last numeric component and treat it as
+  // alpha (e.g. rgb(10,20,30) would extract "30" and produce
+  // rgba(...,...,...,30), which is outside the valid 0..1 range
+  // and silently fails to render).
+  const alphaMatch = existing
+    ? existing.match(/^rgba?\([^)]*\)\s*$/) || existing.match(/^hsla?\([^)]*\)\s*$/)
+    : null;
+  let alpha = '0.6';
+  if (alphaMatch) {
+    const nums = existing!.match(/-?\d*\.?\d+/g);
+    if (nums && nums.length === 4) alpha = nums[3];
+  }
+  return `rgba(${r},${g},${b},${alpha})`;
 }
 
 function inputStyle(colors: typeof import('./colors').colors) {
