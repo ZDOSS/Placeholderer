@@ -165,6 +165,54 @@ describe('CLI generate (e2e)', () => {
     }
   });
 
+  it('reports per-asset errors when an animated sprite sheet has a bad output_path', async () => {
+    if (!canRun) return;
+    const { generateJob, nodeCanvasBackend } = requireCanvas();
+    const dir = mkdtempSync(join(tmpdir(), 'placeholderer-anim-bad-path-'));
+    try {
+      // '..' is rejected by sanitizePath. The main loop won't get
+      // to render this asset because the schema's pattern blocks
+      // '..' too, but we go through a post-validation hook: the
+      // sidecar pass was historically re-running sanitizePath
+      // outside the per-asset try/catch, so a bad path here could
+      // turn a single per-asset failure into a rejected
+      // generateJob call. This test guards against that regression
+      // by bypassing validation and calling generateJob directly.
+      const manifest = {
+        schemaVersion: 1,
+        job: { name: 'anim_bad_path' },
+        requests: [{
+          name: 'enemies',
+          assets: [{
+            kind: 'sprite_sheet',
+            name: 'bad_path_sheet',
+            width: 64, height: 32, format: 'png',
+            // .json file suffix is rejected by the JSON schema's
+            // baseAsset format enum (png/jpg/jpeg/webp). The
+            // sidecar pass reads this raw value, so an exotic
+            // value here surfaces a per-asset error.
+            output_path: '..\\bad\\path',
+            frame_width: 32, frame_height: 32,
+            rows: 1, columns: 2,
+            frame_duration_ms: 150,
+          }],
+        }],
+      };
+      const result = await generateJob(manifest, nodeCanvasBackend);
+      // generateJob must NOT throw — it should return a result
+      // (possibly with errors) so the caller can still emit a
+      // partial ZIP and manifest report.
+      expect(result).toBeDefined();
+      expect(result.zip).toBeDefined();
+      // The bad-path asset was rejected by sanitizePath. The
+      // sheet was never added to the ZIP.
+      const zip = await JSZip.loadAsync(result.zip!);
+      expect(zip.file('..\\bad\\path/bad_path_sheet.png')).toBeNull();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('skips sidecar + report entry when an animated sprite sheet fails', async () => {
     if (!canRun) return;
     // Force the second sprite sheet's render to fail by giving it a

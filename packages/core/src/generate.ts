@@ -160,41 +160,55 @@ export async function generateJob(
   // Animated sprite sheets: emit a sidecar animation.json with the
   // timing data. The sidecar sits next to the sheet so a runtime can
   // pair them by name. Reserved in the main asset loop so its path
+  // Animated sprite sheets: emit a sidecar animation.json with the
+  // timing data. The sidecar sits next to the sheet so a runtime can
+  // pair them by name. Reserved in the main asset loop so its path
   // participates in duplicate detection and is reported in the manifest.
+  //
+  // The sanitizePath/sanitizeFilename calls can throw for malformed
+  // output_paths, but the main loop already pushed this asset's
+  // errors when the sheet itself failed. A second throw here would
+  // reject the whole generateJob call instead of producing a partial
+  // ZIP and per-asset error report, so we wrap the sidecar in its
+  // own try/catch and emit a per-asset error.
   for (const request of job.requests ?? []) {
     for (const asset of request.assets ?? []) {
       if (asset.kind !== 'sprite_sheet') continue;
       const sa = asset as SpriteSheetAsset;
       if (sa.frame_duration_ms == null) continue;
-      const safePath = asset.output_path ? sanitizePath(asset.output_path) : '';
-      const safeName = sanitizeFilename(asset.name);
-      const sheet = `${safeName}.${(asset.format || 'png').toLowerCase()}`;
-      const sheetPath = safePath ? `${safePath}/${sheet}` : sheet;
-      const sidecarFile = `${safeName}.animation.json`;
-      const sidecarPath = safePath ? `${safePath}/${sidecarFile}` : sidecarFile;
-      // Only emit if the asset actually rendered (sidecar is in
-      // createdFiles only when the sheet was added successfully).
-      if (!createdFiles.includes(sheetPath)) continue;
-      // If the user provided an explicit file with the same name, we
-      // reserved the sidecar path in the main loop but never wrote
-      // the sheet — skip the sidecar in that case too.
-      if (!createdFiles.includes(sidecarPath)) continue;
-      const totalFrames = asset.rows * asset.columns;
-      const fps = Math.round(1000 / sa.frame_duration_ms);
-      zip.file(
-        sidecarPath,
-        JSON.stringify({
-          sheet: sheetPath,
-          frame_width: asset.frame_width,
-          frame_height: asset.frame_height,
-          rows: asset.rows,
-          columns: asset.columns,
-          frame_count: totalFrames,
-          frame_duration_ms: sa.frame_duration_ms,
-          fps,
-          total_duration_ms: totalFrames * sa.frame_duration_ms,
-        }, null, 2)
-      );
+      try {
+        const safePath = asset.output_path ? sanitizePath(asset.output_path) : '';
+        const safeName = sanitizeFilename(asset.name);
+        const sheet = `${safeName}.${(asset.format || 'png').toLowerCase()}`;
+        const sheetPath = safePath ? `${safePath}/${sheet}` : sheet;
+        const sidecarFile = `${safeName}.animation.json`;
+        const sidecarPath = safePath ? `${safePath}/${sidecarFile}` : sidecarFile;
+        // Only emit if the asset actually rendered (sidecar is in
+        // createdFiles only when the sheet was added successfully).
+        if (!createdFiles.includes(sheetPath)) continue;
+        // If the user provided an explicit file with the same name, we
+        // reserved the sidecar path in the main loop but never wrote
+        // the sheet — skip the sidecar in that case too.
+        if (!createdFiles.includes(sidecarPath)) continue;
+        const totalFrames = asset.rows * asset.columns;
+        const fps = Math.round(1000 / sa.frame_duration_ms);
+        zip.file(
+          sidecarPath,
+          JSON.stringify({
+            sheet: sheetPath,
+            frame_width: asset.frame_width,
+            frame_height: asset.frame_height,
+            rows: asset.rows,
+            columns: asset.columns,
+            frame_count: totalFrames,
+            frame_duration_ms: sa.frame_duration_ms,
+            fps,
+            total_duration_ms: totalFrames * sa.frame_duration_ms,
+          }, null, 2)
+        );
+      } catch (err: any) {
+        errors.push(`${asset.name} (sidecar): ${err?.message ?? String(err)}`);
+      }
     }
   }
 
