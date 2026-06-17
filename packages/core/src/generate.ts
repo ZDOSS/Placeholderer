@@ -179,6 +179,12 @@ export async function generateJob(
   // explicit user file with that name wins) while still letting
   // the primary sheet land in the ZIP.
   //
+  // A reservation made early in the main loop is only a soft claim:
+  // a LATER asset may have written a file at the same path between
+  // the reservation and now. Re-check `createdFiles` immediately
+  // before writing the sidecar, and commit to `createdFiles` after
+  // writing so the manifest report correctly reflects what landed.
+  //
   // The sanitizePath/sanitizeFilename calls can throw for malformed
   // output_paths, but the main loop already pushed this asset's
   // errors when the sheet itself failed. A second throw here would
@@ -205,6 +211,11 @@ export async function generateJob(
         // was free. If it's not in our reservation set, a prior
         // asset already wrote a file there — leave it alone.
         if (!reservedSidecars.has(sidecarPath)) continue;
+        // Re-check: a later asset in the main loop may have
+        // written the sidecar path as its primary output between
+        // our reservation and now. Don't overwrite — let the
+        // later asset's file win.
+        if (createdFiles.includes(sidecarPath)) continue;
         const totalFrames = asset.rows * asset.columns;
         const fps = Math.round(1000 / sa.frame_duration_ms);
         zip.file(
@@ -221,6 +232,11 @@ export async function generateJob(
             total_duration_ms: totalFrames * sa.frame_duration_ms,
           }, null, 2)
         );
+        // Commit the sidecar to createdFiles so the manifest
+        // report includes it. Without this, the report lists
+        // only the primary sheet and the sidecar becomes a
+        // "secret" file in the ZIP.
+        createdFiles.push(sidecarPath);
       } catch (err: any) {
         errors.push(`${asset.name} (sidecar): ${err?.message ?? String(err)}`);
       }

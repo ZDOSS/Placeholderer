@@ -582,6 +582,29 @@ function layerToSVG(layer: Layer): { markup: string; filter: FilterSpec | null; 
     return { markup: `  ${g}`, filter, fill: null, clipDef: clipImage.clipDef };
   }
 
+  // Text with stretch image fill: buildSVGClipAndImage returns null
+  // for text (clip-paths aren't meaningful for glyphs), but the
+  // canvas path (drawText) renders the image as a background rect
+  // with the text drawn on top in white. Mirror that here so the
+  // SVG export matches the editor preview — otherwise the layer
+  // silently exports a solid-color fill and drops the image.
+  const textImageFill: any = layer.fill;
+  if (layer.type === 'text' && textImageFill && typeof textImageFill === 'object' && textImageFill.type === 'image' && textImageFill.mode === 'stretch' && textImageFill.src) {
+    const content = escapeXML(layer.text?.content ?? layer.name ?? 'Text');
+    const fontSize = layer.text?.fontSize ?? 24;
+    const fontFamily = layer.text?.fontFamily ?? 'system-ui, sans-serif';
+    const align = layer.text?.align ?? 'left';
+    const textAnchor = align === 'center' ? 'middle' : align === 'right' ? 'end' : 'start';
+    const textX = align === 'center' ? x + w / 2 : align === 'right' ? x + w : x;
+    // Background image + glyphs on top in white. The background
+    // uses the layer's id for the image href id (no <pattern>/
+    // <clipPath> needed because a stretched image fits exactly).
+    const bg = `<image href="${escapeXML(textImageFill.src)}" x="${x}" y="${y}" width="${w}" height="${h}"/>`;
+    const fg = `<text x="${textX}" y="${y + fontSize}"${opacity}${transform}${filterAttr} fill="#ffffff" font-family="${escapeXML(fontFamily)}" font-size="${fontSize}" font-weight="bold" text-anchor="${textAnchor}">${content}</text>`;
+    const g = `<g>${bg}${fg}</g>`;
+    return { markup: `  ${g}`, filter, fill: null };
+  }
+
   switch (layer.type) {
     case 'rect': {
       const markup = `  <rect x="${x}" y="${y}" width="${w}" height="${h}"${strokeAttr}${opacity}${transform}${filterAttr} ${fillRef}/>`;

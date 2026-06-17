@@ -84,3 +84,45 @@ describe('hexToRgba', () => {
     expect(out).toBe('rgba(170,187,204,0.6)');
   });
 });
+
+describe('exportSVG text stretch image fills', () => {
+  // Regression for Greptile round 9: text layers with a stretch
+  // image fill used to export as a solid fallback fill in SVG,
+  // even though the canvas preview showed the stretched image
+  // behind the glyphs. The fix mirrors drawText by emitting an
+  // <image> background with the <text> on top in white.
+
+  it('emits an <image> background for text stretch fills', () => {
+    const layer: Layer = {
+      id: 't1',
+      type: 'text',
+      name: 'label',
+      visible: true,
+      locked: false,
+      x: 10, y: 20, width: 200, height: 60,
+      fill: { type: 'image', src: 'bg.png', mode: 'stretch' },
+      text: { content: 'Hello', fontSize: 24, fontFamily: 'Arial', align: 'left' },
+    };
+    const svg = exportSVG([layer], 300, 100);
+    expect(svg).toMatch(/<image[^>]*href="bg\.png"/);
+    expect(svg).toMatch(/<text[^>]*fill="#ffffff"/);
+    // The text content must still be present.
+    expect(svg).toContain('Hello');
+  });
+
+  it('does not emit an <image> for text with a solid color fill', () => {
+    const layer: Layer = {
+      id: 't2',
+      type: 'text',
+      name: 'plain',
+      visible: true,
+      locked: false,
+      x: 0, y: 0, width: 200, height: 40,
+      fill: '#ff0000',
+      text: { content: 'plain', fontSize: 18 },
+    };
+    const svg = exportSVG([layer], 200, 100);
+    expect(svg).not.toMatch(/<image/);
+    expect(svg).toMatch(/<text[^>]*fill="#ff0000"/);
+  });
+});
