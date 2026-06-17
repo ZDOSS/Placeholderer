@@ -208,11 +208,15 @@ function drawImageFillOverlay(ctx: CanvasRenderingContext2D, layer: any, x: numb
   const fill: any = layer.fill;
   if (!fill || typeof fill === 'string' || fill.type !== 'image' || !fill.src) return;
   const img = rasterCache.get(fill.src);
-  if (!img) return;
+  // Only draw if the image has actually finished loading. The
+  // preload effect only inserts fully-loaded Images into the cache,
+  // but a render that fires while the load is still in flight would
+  // otherwise hit drawImage/createPattern with a half-loaded
+  // bitmap. Falling through here keeps the fallback fill visible.
+  if (!img || !img.complete || img.naturalWidth === 0) return;
   if (fill.mode === 'stretch') {
     ctx.drawImage(img, x, y, w, h);
   } else {
-    // repeat (default for image fills)
     const pat = ctx.createPattern(img, 'repeat');
     if (pat) {
       ctx.save();

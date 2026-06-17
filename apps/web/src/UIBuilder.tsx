@@ -180,12 +180,26 @@ export function UIBuilder() {
       }
     }
     for (const src of sources) {
-      if (rasterCache.has(src)) continue;
+      // Skip sources that already finished loading. The cache is the
+      // only signal drawImageFillOverlay and drawRaster trust, so we
+      // don't put an Image in it until onload has actually fired —
+      // that way an in-flight load stays invisible (and drawImage
+      // doesn't get handed a half-loaded image).
+      const existing = rasterCache.get(src);
+      if (existing && existing.complete && existing.naturalWidth > 0) continue;
       const img = new Image();
-      img.onload = () => { if (!cancelled) setPreloadTick((t) => t + 1); };
-      img.onerror = () => { if (!cancelled) setPreloadTick((t) => t + 1); };
+      img.onload = () => {
+        if (cancelled) return;
+        rasterCache.set(src, img);
+        setPreloadTick((t) => t + 1);
+      };
+      img.onerror = () => {
+        if (cancelled) return;
+        // Don't cache failures. The render effect will keep using
+        // the fallback fill.
+        setPreloadTick((t) => t + 1);
+      };
       img.src = src;
-      rasterCache.set(src, img);
     }
     return () => { cancelled = true; };
   }, [state.layers]);
