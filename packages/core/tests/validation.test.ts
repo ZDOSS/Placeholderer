@@ -110,6 +110,68 @@ describe('validateManifest', () => {
     });
     expect(result.valid).toBe(false);
   });
+
+  it('accepts a phase-2 audio asset without width/height', () => {
+    // Audio is dimensionless: width/height are image-only fields.
+    // The old baseAsset required them and the head flow's
+    // validateManifest rejected every audio manifest before
+    // generation. A minimal valid audio asset should now pass.
+    const result = validateManifest({
+      schemaVersion: 1,
+      job: { name: 'audio_test' },
+      requests: [{
+        name: 'sfx',
+        assets: [{
+          kind: 'audio',
+          name: 'beep',
+          format: 'wav',
+          output_path: 'sfx',
+          frequency: 440,
+          duration: 0.25,
+          sample_rate: 22050,
+        }],
+      }],
+    });
+    if (!result.valid) {
+      // Surface the actual errors when the assertion fails.
+      // eslint-disable-next-line no-console
+      console.error('audio validation errors:', result.errors);
+    }
+    expect(result.valid).toBe(true);
+  });
+
+  it('accepts an image asset with width/height', () => {
+    // Sanity check that the dimensional requirement still applies
+    // to image-style assets after splitting the base.
+    const result = validateManifest(validManifest);
+    expect(result.valid).toBe(true);
+  });
+
+  it('rejects an image asset missing width or height', () => {
+    const result = validateManifest({
+      ...validManifest,
+      requests: [{
+        ...validManifest.requests[0],
+        assets: [{ ...validManifest.requests[0].assets[0], width: undefined as any }],
+      }],
+    });
+    expect(result.valid).toBe(false);
+  });
+
+  it('rejects an audio asset missing frequency or duration', () => {
+    const result = validateManifest({
+      schemaVersion: 1,
+      requests: [{
+        assets: [{
+          kind: 'audio',
+          name: 'beep',
+          format: 'wav',
+          output_path: 'sfx',
+        }],
+      }],
+    });
+    expect(result.valid).toBe(false);
+  });
 });
 
 describe('validateBuilderRecipe', () => {

@@ -13,13 +13,40 @@ export function AssetPreview({ asset }: Props) {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    const ctx = canvas.getContext('2d')!;
-    canvas.width = Math.min(asset.width, 400);
-    canvas.height = Math.min(asset.height, 300);
+    // Audio assets are dimensionless; show a small placeholder
+    // canvas with a "play" arrow and the asset name instead of
+    // trying to scale zero-sized dimensions.
+    if (asset.kind === 'audio') {
+      const ctx = canvas.getContext('2d')!;
+      canvas.width = 200;
+      canvas.height = 80;
+      ctx.fillStyle = '#4A5568';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 14px system-ui';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      // Simple triangle "play" indicator.
+      ctx.beginPath();
+      ctx.moveTo(canvas.width / 2 - 8, canvas.height / 2 - 12);
+      ctx.lineTo(canvas.width / 2 - 8, canvas.height / 2 + 12);
+      ctx.lineTo(canvas.width / 2 + 12, canvas.height / 2);
+      ctx.closePath();
+      ctx.fill();
+      return;
+    }
 
-    const scale = Math.min(canvas.width / asset.width, canvas.height / asset.height);
-    const w = asset.width * scale;
-    const h = asset.height * scale;
+    const ctx = canvas.getContext('2d')!;
+    // Image-style assets always carry width/height (schema requires
+    // them for image/sprite_sheet/tileset/ui_panel).
+    const aw = asset.width ?? 1;
+    const ah = asset.height ?? 1;
+    canvas.width = Math.min(aw, 400);
+    canvas.height = Math.min(ah, 300);
+
+    const scale = Math.min(canvas.width / aw, canvas.height / ah);
+    const w = aw * scale;
+    const h = ah * scale;
 
     ctx.fillStyle = asset.background_color || '#4A5568';
     ctx.fillRect(0, 0, canvas.width, canvas.height);

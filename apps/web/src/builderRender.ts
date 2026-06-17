@@ -270,7 +270,31 @@ function drawText(ctx: CanvasRenderingContext2D, layer: any, x: number, y: numbe
   const fontFamily = layer.text?.fontFamily ?? 'system-ui, sans-serif';
   const align = layer.text?.align ?? 'left';
   ctx.font = `bold ${fontSize}px ${fontFamily}`;
-  ctx.fillStyle = fillToColor(layer.fill, '#ffffff');
+
+  const fill: any = layer.fill;
+  // For image fills on text, draw the image as a background rect
+  // and then the text on top in a contrasting color so the glyphs
+  // stay readable. Pattern fills work directly via fillStyle.
+  if (fill && typeof fill === 'object' && fill.type === 'image' && fill.src) {
+    const img = rasterCache.get(fill.src);
+    if (img && img.complete && img.naturalWidth > 0) {
+      if (fill.mode === 'stretch') {
+        ctx.drawImage(img, x, y, w, _h);
+      } else {
+        const pat = ctx.createPattern(img, 'repeat');
+        if (pat) {
+          ctx.save();
+          ctx.fillStyle = pat;
+          ctx.fillRect(x, y, w, _h);
+          ctx.restore();
+        }
+      }
+    }
+    ctx.fillStyle = '#ffffff';
+  } else {
+    ctx.fillStyle = resolveFill(layer.fill, '#ffffff', ctx);
+  }
+
   ctx.textAlign = align as CanvasTextAlign;
   const textX = align === 'center' ? x + w / 2 : align === 'right' ? x + w : x;
   ctx.fillText(content, textX, y + fontSize);
@@ -332,8 +356,16 @@ function drawFilledShape(ctx: CanvasRenderingContext2D, layer: any, x: number, y
   ctx.arcTo(x, y + h, x, y, r);
   ctx.arcTo(x, y, x + w, y, r);
   ctx.closePath();
-  ctx.fillStyle = fillToColor(layer.fill, '#4A5568');
+  // Mirror the rect/circle paths: use resolveFill for the base
+  // (handles solid + pattern) and the image-fill overlay for image
+  // fills, both clipped to the rounded-rect path so the image
+  // doesn't bleed outside the corners.
+  ctx.fillStyle = resolveFill(layer.fill, '#4A5568', ctx);
   ctx.fill();
+  ctx.save();
+  ctx.clip();
+  drawImageFillOverlay(ctx, layer, x, y, w, h);
+  ctx.restore();
   const stroke = strokeToStroke(layer.stroke);
   if (stroke) {
     ctx.strokeStyle = stroke.color;
@@ -348,28 +380,84 @@ export type SupportedExportFormat = 'png' | 'jpeg' | 'svg';
  * Serialize the layer stack to an SVG document. Used by the
  * "Export SVG" button so the builder output has a real vector path
  * (per the v1 spec's required export formats).
+ *
+ * Pattern and image fills emit <pattern> elements inside <defs> and
+ * reference them via fill="url(#...)". The same layer is referenced
+ * by both an opacity (the layer's opacity) and the pattern's
+ * content; we wrap the layer's geometry in a <g> for the opacity so
+ * the pattern is unaffected.
  */
 export function exportSVG(layers: Layer[], width: number, height: number): string {
   const visible = layers.filter((l) => l.visible);
   const rendered = visible.map((l) => layerToSVG(l));
   const body = rendered.map((r) => r.markup).join('\n');
-  const defs = rendered
-    .map((r) => r.filter?.def ?? '')
-    .filter(Boolean)
-    .join('\n  ');
-  const defsBlock = defs ? `\n  <defs>\n  ${defs}\n  </defs>` : '';
+  const defsParts = rendered
+    .flatMap((r) => [r.filter?.def ?? '', r.fill?.def ?? ''])
+    .filter(Boolean);
+  const defsBlock = defsParts.length
+    ? `\n  <defs>\n  ${defsParts.join('\n  ')}\n  </defs>`
+    : '';
   return `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">${defsBlock}
 ${body}
 </svg>`;
 }
 
-function layerToSVG(layer: Layer): { markup: string; filter: FilterSpec | null } {
+interface SVGFillSpec {
+  id: string;
+  def: string;
+  ref: string;
+}
+
+/** Build a <pattern> element definition for a layer's fill.
+ *  Returns null for solid colors (no def needed) and the matching
+ *  <pattern> for pattern/image fills. */
+function buildSVGFill(layer: Layer): SVGFillSpec | null {
+  const fill: any = layer.fill;
+  if (!fill || typeof fill === 'string') return null;
+  // Solid / string fills need no <pattern> def; the SVG fill
+  // attribute is the color literal.
+  if (fill.type !== 'pattern' && fill.type !== 'image') return null;
+
+  const id = `f-${layer.id}-${fill.type}`;
+  let def: string;
+  if (fill.type === 'pattern') {
+    // Mirror buildPattern in the canvas path: checkerboard, stripes,
+    // diagonal. Tile size 16 matches the canvas implementation.
+    const T = 16;
+    const fg = '#4A5568';
+    let inner = '';
+    if (fill.pattern === 'checkerboard') {
+      inner = `<rect x="0" y="0" width="${T / 2}" height="${T / 2}" fill="${fg}"/>` +
+              `<rect x="${T / 2}" y="${T / 2}" width="${T / 2}" height="${T / 2}" fill="${fg}"/>`;
+    } else if (fill.pattern === 'stripes') {
+      inner = Array.from({ length: 4 }, (_, i) =>
+        `<rect x="0" y="${i * 4}" width="${T}" height="2" fill="${fg}"/>`
+      ).join('');
+    } else if (fill.pattern === 'diagonal') {
+      inner = Array.from({ length: 6 }, (_, i) =>
+        `<line x1="${i * 4 - T}" y1="${T}" x2="${i * 4 - T + T}" y2="0" stroke="${fg}" stroke-width="1"/>`
+      ).join('');
+    }
+    def = `<pattern id="${id}" patternUnits="userSpaceOnUse" width="${T}" height="${T}">${inner}</pattern>`;
+  } else {
+    // Image fill: a <pattern> wrapping an <image>. Tile size matches
+    // the layer bounds so the bitmap repeats at the same scale as
+    // the canvas createPattern(repeat) path.
+    const w = layer.width ?? 100;
+    const h = layer.height ?? 100;
+    def = `<pattern id="${id}" patternUnits="userSpaceOnUse" width="${w}" height="${h}">` +
+          `<image href="${escapeXML(fill.src ?? '')}" width="${w}" height="${h}"/>` +
+          `</pattern>`;
+  }
+  return { id, def, ref: `url(#${id})` };
+}
+
+function layerToSVG(layer: Layer): { markup: string; filter: FilterSpec | null; fill: SVGFillSpec | null } {
   const x = layer.x ?? 0;
   const y = layer.y ?? 0;
   const w = layer.width ?? 0;
   const h = layer.height ?? 0;
-  const fill = fillToColor(layer.fill, '#4A5568');
   const stroke = strokeToStroke(layer.stroke);
   const strokeAttr = stroke ? ` stroke="${stroke.color}" stroke-width="${stroke.width}"` : '';
   const opacity = layer.opacity != null && layer.opacity !== 1 ? ` opacity="${layer.opacity}"` : '';
@@ -379,19 +467,26 @@ function layerToSVG(layer: Layer): { markup: string; filter: FilterSpec | null }
   const filter = buildSVGFilter(layer);
   const filterAttr = filter?.ref ?? '';
 
+  // Pattern and image fills: emit a <pattern> def and reference it.
+  // Falls back to the solid color if the fill can't be encoded.
+  const fillDef = buildSVGFill(layer);
+  const fillRef = fillDef ? `fill="${fillDef.ref}"` : `fill="${fillToColor(layer.fill, '#4A5568')}"`;
+
   switch (layer.type) {
     case 'rect': {
-      const markup = `  <rect x="${x}" y="${y}" width="${w}" height="${h}" fill="${fill}"${strokeAttr}${opacity}${transform}${filterAttr}/>`;
-      return { markup, filter };
+      const markup = `  <rect x="${x}" y="${y}" width="${w}" height="${h}"${strokeAttr}${opacity}${transform}${filterAttr} ${fillRef}/>`;
+      return { markup, filter, fill: fillDef };
     }
     case 'circle': {
-      const markup = `  <ellipse cx="${x + w / 2}" cy="${y + h / 2}" rx="${w / 2}" ry="${h / 2}" fill="${fill}"${strokeAttr}${opacity}${transform}${filterAttr}/>`;
-      return { markup, filter };
+      const markup = `  <ellipse cx="${x + w / 2}" cy="${y + h / 2}" rx="${w / 2}" ry="${h / 2}"${strokeAttr}${opacity}${transform}${filterAttr} ${fillRef}/>`;
+      return { markup, filter, fill: fillDef };
     }
     case 'line': {
+      // Lines have no fill (they're stroked), so the fill spec is
+      // irrelevant — emit the stroke and skip the pattern def.
       const strokeDef = stroke ?? { color: '#718096', width: 2 };
       const markup = `  <line x1="${x}" y1="${y + h / 2}" x2="${x + w}" y2="${y + h / 2}" stroke="${strokeDef.color}" stroke-width="${strokeDef.width}"${opacity}${transform}/>`;
-      return { markup, filter: null };
+      return { markup, filter: null, fill: null };
     }
     case 'text': {
       const content = escapeXML(layer.text?.content ?? layer.name ?? 'Text');
@@ -400,19 +495,19 @@ function layerToSVG(layer: Layer): { markup: string; filter: FilterSpec | null }
       const align = layer.text?.align ?? 'left';
       const textAnchor = align === 'center' ? 'middle' : align === 'right' ? 'end' : 'start';
       const textX = align === 'center' ? x + w / 2 : align === 'right' ? x + w : x;
-      const markup = `  <text x="${textX}" y="${y + fontSize}" fill="${fill}" font-family="${fontFamily}" font-size="${fontSize}" font-weight="bold" text-anchor="${textAnchor}"${opacity}${transform}>${content}</text>`;
-      return { markup, filter: null };
+      const markup = `  <text x="${textX}" y="${y + fontSize}"${strokeAttr}${opacity}${transform}${filterAttr} ${fillRef} font-family="${fontFamily}" font-size="${fontSize}" font-weight="bold" text-anchor="${textAnchor}">${content}</text>`;
+      return { markup, filter: null, fill: fillDef };
     }
     case 'raster': {
       const markup = layer.rasterSrc
         ? `  <image x="${x}" y="${y}" width="${w}" height="${h}" href="${escapeXML(layer.rasterSrc)}"${opacity}${transform}/>`
         : '';
-      return { markup, filter: null };
+      return { markup, filter: null, fill: null };
     }
     case 'filled-shape': {
       const r = Math.min(8, w / 4, h / 4);
-      const markup = `  <rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${r}" ry="${r}" fill="${fill}"${strokeAttr}${opacity}${transform}${filterAttr}/>`;
-      return { markup, filter };
+      const markup = `  <rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${r}" ry="${r}"${strokeAttr}${opacity}${transform}${filterAttr} ${fillRef}/>`;
+      return { markup, filter, fill: fillDef };
     }
   }
 }
@@ -435,7 +530,10 @@ function buildSVGFilter(layer: Layer): FilterSpec | null {
   if (layer.effects?.glow) {
     const g = layer.effects.glow;
     const id = `f-${layer.id}-glow`;
-    const def = `<filter id="${id}"><feGaussianBlur stdDeviation="${(g.blur ?? 12) / 2}"/></filter>`;
+    // Mirror the canvas applyGlow: feDropShadow with no offset, the
+    // glow color, and the configured blur. That keeps the layer's
+    // shape visible while adding a colored blur halo.
+    const def = `<filter id="${id}"><feDropShadow dx="0" dy="0" stdDeviation="${(g.blur ?? 12) / 2}" flood-color="${g.color ?? 'rgba(255,255,255,0.6)'}"/></filter>`;
     return { id, def, ref: ` filter="url(#${id})"` };
   }
   return null;

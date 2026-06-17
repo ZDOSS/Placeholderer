@@ -44,12 +44,13 @@ export interface JobMeta {
   defaults?: JobDefaults;
 }
 
-/** Fields shared by every asset kind. */
+/** Fields shared by every asset kind. Image-style assets also need
+ *  width/height; audio does not. */
 export interface BaseAsset {
   kind: AssetKind;
   name: string;
-  width: number;
-  height: number;
+  width?: number;
+  height?: number;
   format: Format;
   output_path: string;
   label_enabled?: boolean;
@@ -60,11 +61,18 @@ export interface BaseAsset {
   custom_fill_image?: string;
 }
 
-export interface ImageAsset extends BaseAsset {
+/** BaseAsset plus the image dimensions, which every image-style
+ *  asset (image, sprite_sheet, tileset, ui_panel) requires. */
+export interface DimensionalAsset extends BaseAsset {
+  width: number;
+  height: number;
+}
+
+export interface ImageAsset extends DimensionalAsset {
   kind: 'image';
 }
 
-export interface SpriteSheetAsset extends BaseAsset {
+export interface SpriteSheetAsset extends DimensionalAsset {
   kind: 'sprite_sheet';
   frame_width: number;
   frame_height: number;
@@ -76,13 +84,13 @@ export interface SpriteSheetAsset extends BaseAsset {
   frame_duration_ms?: number;
 }
 
-export interface TilesetAsset extends BaseAsset {
+export interface TilesetAsset extends DimensionalAsset {
   kind: 'tileset';
   tile_width: number;
   tile_height: number;
 }
 
-export interface UiPanelAsset extends BaseAsset {
+export interface UiPanelAsset extends DimensionalAsset {
   kind: 'ui_panel';
   frame_style?: FrameStyle;
   panel_guides?: boolean;

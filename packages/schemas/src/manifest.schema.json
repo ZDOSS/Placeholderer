@@ -57,7 +57,8 @@
   "definitions": {
     "baseAsset": {
       "type": "object",
-      "required": ["kind", "name", "width", "height", "format", "output_path"],
+      "required": ["kind", "name", "format", "output_path"],
+      "description": "Common fields for every asset kind. Image-style assets also require width/height; audio does not.",
       "properties": {
         "kind": { "type": "string" },
         "name": { "type": "string" },
@@ -85,6 +86,7 @@
         { "$ref": "#/definitions/baseAsset" },
         {
           "type": "object",
+          "required": ["kind", "width", "height"],
           "properties": {
             "kind": { "const": "image" },
             "format": { "type": "string", "enum": ["png", "jpg", "jpeg", "webp"] }
@@ -97,6 +99,7 @@
         { "$ref": "#/definitions/baseAsset" },
         {
           "type": "object",
+          "required": ["kind", "width", "height", "frame_width", "frame_height", "rows", "columns"],
           "properties": {
             "kind": { "const": "sprite_sheet" },
             "format": { "type": "string", "enum": ["png", "jpg", "jpeg", "webp"] },
@@ -106,8 +109,7 @@
             "columns": { "type": "integer", "minimum": 1 },
             "show_grid": { "type": "boolean", "default": true },
             "frame_duration_ms": { "type": "number", "minimum": 1, "maximum": 10000, "description": "Per-frame duration in ms; when set, the generator emits an animation.json sidecar" }
-          },
-          "required": ["frame_width", "frame_height", "rows", "columns"]
+          }
         }
       ]
     },
@@ -116,13 +118,13 @@
         { "$ref": "#/definitions/baseAsset" },
         {
           "type": "object",
+          "required": ["kind", "width", "height", "tile_width", "tile_height"],
           "properties": {
             "kind": { "const": "tileset" },
             "format": { "type": "string", "enum": ["png", "jpg", "jpeg", "webp"] },
             "tile_width": { "type": "integer", "minimum": 1 },
             "tile_height": { "type": "integer", "minimum": 1 }
-          },
-          "required": ["tile_width", "tile_height"]
+          }
         }
       ]
     },
@@ -131,6 +133,7 @@
         { "$ref": "#/definitions/baseAsset" },
         {
           "type": "object",
+          "required": ["kind", "width", "height"],
           "properties": {
             "kind": { "const": "ui_panel" },
             "format": { "type": "string", "enum": ["png", "jpg", "jpeg", "webp"] },
@@ -146,6 +149,7 @@
         { "$ref": "#/definitions/baseAsset" },
         {
           "type": "object",
+          "required": ["kind", "frequency", "duration"],
           "properties": {
             "kind": { "const": "audio" },
             "format": { "type": "string", "enum": ["wav"] },
@@ -153,8 +157,7 @@
             "duration": { "type": "number", "minimum": 0.01, "maximum": 60, "description": "Duration in seconds" },
             "sample_rate": { "type": "integer", "minimum": 8000, "maximum": 96000, "default": 44100 },
             "amplitude": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.5 }
-          },
-          "required": ["frequency", "duration"]
+          }
         }
       ]
     }

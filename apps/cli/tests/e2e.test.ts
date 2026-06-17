@@ -127,6 +127,34 @@ describe('CLI generate (e2e)', () => {
     expect(result.valid).toBe(false);
   });
 
+  it('accepts a phase-2 audio manifest at validation time', async () => {
+    if (!canRun) return;
+    // The CLI's runValidate is what gates generateJob; assert the
+    // minimal phase-2 audio shape (no width/height) validates so
+    // the documented audio flow can actually be used.
+    const core = await import('@placeholderer/core');
+    const result = core.validateManifest({
+      schemaVersion: 1,
+      job: { name: 'audio_validate' },
+      requests: [{
+        name: 'sfx',
+        assets: [{
+          kind: 'audio',
+          name: 'beep',
+          format: 'wav',
+          output_path: 'sfx',
+          frequency: 440,
+          duration: 0.25,
+        }],
+      }],
+    });
+    if (!result.valid) {
+      // eslint-disable-next-line no-console
+      console.error('audio validation errors:', result.errors);
+    }
+    expect(result.valid).toBe(true);
+  });
+
   it('emits an animation.json sidecar for animated sprite sheets', async () => {
     if (!canRun) return;
     const { generateJob, nodeCanvasBackend } = requireCanvas();
@@ -291,6 +319,8 @@ describe('CLI generate (e2e)', () => {
     const { generateJob, nodeCanvasBackend } = requireCanvas();
     const dir = mkdtempSync(join(tmpdir(), 'placeholderer-audio-e2e-'));
     try {
+      // Audio is dimensionless: omit width/height to assert the
+      // new minimal shape validates and generates correctly.
       const manifest = {
         schemaVersion: 1,
         job: { name: 'audio_e2e' },
@@ -299,7 +329,7 @@ describe('CLI generate (e2e)', () => {
           assets: [{
             kind: 'audio',
             name: 'beep',
-            width: 1, height: 1, format: 'wav',
+            format: 'wav',
             output_path: 'sfx',
             frequency: 440,
             duration: 0.25,
