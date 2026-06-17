@@ -617,9 +617,11 @@ function layerToSVG(layer: Layer): { markup: string; filter: FilterSpec | null; 
     case 'line': {
       // Lines have no fill (they're stroked), so the fill spec is
       // irrelevant — emit the stroke and skip the pattern def.
+      // Apply the filter attr so glow/shadow effects land on the
+      // line (the canvas path applies them to the whole context).
       const strokeDef = stroke ?? { color: '#718096', width: 2 };
-      const markup = `  <line x1="${x}" y1="${y + h / 2}" x2="${x + w}" y2="${y + h / 2}" stroke="${escapeXML(strokeDef.color)}" stroke-width="${strokeDef.width}"${opacity}${transform}/>`;
-      return { markup, filter: null, fill: null };
+      const markup = `  <line x1="${x}" y1="${y + h / 2}" x2="${x + w}" y2="${y + h / 2}" stroke="${escapeXML(strokeDef.color)}" stroke-width="${strokeDef.width}"${opacity}${transform}${filterAttr}/>`;
+      return { markup, filter, fill: null };
     }
     case 'text': {
       const content = escapeXML(layer.text?.content ?? layer.name ?? 'Text');
@@ -635,10 +637,13 @@ function layerToSVG(layer: Layer): { markup: string; filter: FilterSpec | null; 
       return { markup, filter, fill: fillDef };
     }
     case 'raster': {
+      // Apply the filter attr so glow/shadow effects land on the
+      // raster image (the canvas path applies them to the whole
+      // context, including raster layers).
       const markup = layer.rasterSrc
-        ? `  <image x="${x}" y="${y}" width="${w}" height="${h}" href="${escapeXML(layer.rasterSrc)}"${opacity}${transform}/>`
+        ? `  <image x="${x}" y="${y}" width="${w}" height="${h}" href="${escapeXML(layer.rasterSrc)}"${opacity}${transform}${filterAttr}/>`
         : '';
-      return { markup, filter: null, fill: null };
+      return { markup, filter, fill: null };
     }
     case 'filled-shape': {
       const r = Math.min(8, w / 4, h / 4);

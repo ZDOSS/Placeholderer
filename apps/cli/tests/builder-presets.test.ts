@@ -166,4 +166,40 @@ describe('exportSVG effect filter defs', () => {
     expect(svg).toMatch(/<filter id="f-t4-shadow"/);
     expect(svg).toMatch(/filter="url\(#f-t4-shadow\)"/);
   });
+
+  it('applies the glow filter to line layers', () => {
+    // Regression for Greptile round 11: line and raster branches
+    // returned `filter: null` and omitted filterAttr from the
+    // markup, so the canvas applyGlow/applyShadow effects never
+    // landed in the SVG export.
+    const layer: Layer = {
+      id: 'ln1',
+      type: 'line',
+      name: 'line',
+      visible: true,
+      locked: false,
+      x: 10, y: 20, width: 100, height: 4,
+      stroke: { color: '#ffffff', width: 2 },
+      effects: { glow: { blur: 8, color: 'rgba(255,255,255,0.6)' } },
+    };
+    const svg = exportSVG([layer], 200, 100);
+    expect(svg).toMatch(/<filter id="f-ln1-glow"/);
+    expect(svg).toMatch(/<line[^>]*filter="url\(#f-ln1-glow\)"/);
+  });
+
+  it('applies the shadow filter to raster layers', () => {
+    const layer: Layer = {
+      id: 'rs1',
+      type: 'raster',
+      name: 'raster',
+      visible: true,
+      locked: false,
+      x: 10, y: 20, width: 100, height: 80,
+      rasterSrc: 'img.png',
+      effects: { shadow: { blur: 6, color: 'rgba(0,0,0,0.5)' } },
+    };
+    const svg = exportSVG([layer], 200, 200);
+    expect(svg).toMatch(/<filter id="f-rs1-shadow"/);
+    expect(svg).toMatch(/<image[^>]*filter="url\(#f-rs1-shadow\)"/);
+  });
 });
