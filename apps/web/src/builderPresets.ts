@@ -57,7 +57,9 @@ const unityHealthBar: BuilderPreset = {
   ],
 };
 
-/** Unreal HUD crosshair: a center plus shape (two thin lines). */
+/** Unreal HUD crosshair: a center plus shape. The vertical arm
+ *  has to be a thin rectangle — lineLayer is always horizontal
+ *  (height only moves the y-center, not the orientation). */
 const unrealCrosshair: BuilderPreset = {
   id: makeId(),
   engine: 'Unreal',
@@ -67,7 +69,7 @@ const unrealCrosshair: BuilderPreset = {
   height: 32,
   layers: [
     lineLayer({ id: 'h', name: 'Horizontal', x: 4, y: 14, width: 24, height: 4, stroke: { color: '#FFFFFF', width: 2 } }),
-    lineLayer({ id: 'v', name: 'Vertical', x: 14, y: 4, width: 4, height: 24, stroke: { color: '#FFFFFF', width: 2 } }),
+    rectLayer({ id: 'v', name: 'Vertical', x: 14, y: 4, width: 4, height: 24, fill: '#FFFFFF' }),
   ],
 };
 

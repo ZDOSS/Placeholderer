@@ -83,6 +83,12 @@ export async function generateJob(
   let totalAssets = 0;
   let successful = 0;
 
+  // Sidecar reservations for animated sprite sheets. Tracked
+  // separately from committed files so a sprite sheet can still
+  // be written when only its sidecar path collides with a prior
+  // asset (the primary sheet path is what blocks generation).
+  const reservedSidecars = new Set<string>();
+
   for (const request of job.requests ?? []) {
     // Collect declared folders so we can materialize empty ones later.
     for (const folder of request.folders ?? []) {
@@ -105,19 +111,21 @@ export async function generateJob(
         const filename = `${safeName}.${ext}`;
         const fullPath = safePath ? `${safePath}/${filename}` : filename;
 
-        // Animated sprite sheets emit a sidecar; reserve its path
-        // here so the duplicate check covers both the sheet and the
-        // sidecar, and an explicit user file with the same name wins
-        // (we skip the sidecar in that case).
+        // Animated sprite sheets emit a sidecar. Note its path
+        // here so the sidecar pass can decide whether to write
+        // (it's skipped when the sidecar path was already taken
+        // by a prior asset).
         let sidecarPath: string | null = null;
         if (asset.kind === 'sprite_sheet' && (asset as SpriteSheetAsset).frame_duration_ms != null) {
           const sidecarFile = `${safeName}.animation.json`;
           sidecarPath = safePath ? `${safePath}/${sidecarFile}` : sidecarFile;
         }
 
-        // Duplicate check against everything previously committed
-        // in this run.
-        if (createdFiles.includes(fullPath) || (sidecarPath && createdFiles.includes(sidecarPath))) {
+        // Duplicate check: only the primary output path can block
+        // the whole asset. A collision on the optional sidecar
+        // path is fine — the sheet still gets written, and the
+        // sidecar pass will detect the prior commitment and skip.
+        if (createdFiles.includes(fullPath)) {
           errors.push(`${asset.name}: duplicate output path "${fullPath}"`);
           continue;
         }
@@ -139,7 +147,13 @@ export async function generateJob(
         // neither path leaks into the sidecar pass or the report.
         zip.file(fullPath, bytes);
         createdFiles.push(fullPath);
-        if (sidecarPath) createdFiles.push(sidecarPath);
+        // Reserve the sidecar path for this asset. If the path is
+        // already taken (a prior asset wrote to it), we skip the
+        // reservation — the sidecar pass will see the prior file
+        // in createdFiles and leave it alone.
+        if (sidecarPath && !createdFiles.includes(sidecarPath)) {
+          reservedSidecars.add(sidecarPath);
+        }
         successful++;
       } catch (err: any) {
         errors.push(`${asset.name}: ${err?.message ?? String(err)}`);
@@ -159,11 +173,11 @@ export async function generateJob(
 
   // Animated sprite sheets: emit a sidecar animation.json with the
   // timing data. The sidecar sits next to the sheet so a runtime can
-  // pair them by name. Reserved in the main asset loop so its path
-  // Animated sprite sheets: emit a sidecar animation.json with the
-  // timing data. The sidecar sits next to the sheet so a runtime can
-  // pair them by name. Reserved in the main asset loop so its path
-  // participates in duplicate detection and is reported in the manifest.
+  // pair them by name. The main asset loop reserves the sidecar
+  // path in `reservedSidecars` only when it's free, so the sidecar
+  // pass skips assets whose sidecar path was already taken (an
+  // explicit user file with that name wins) while still letting
+  // the primary sheet land in the ZIP.
   //
   // The sanitizePath/sanitizeFilename calls can throw for malformed
   // output_paths, but the main loop already pushed this asset's
@@ -183,13 +197,14 @@ export async function generateJob(
         const sheetPath = safePath ? `${safePath}/${sheet}` : sheet;
         const sidecarFile = `${safeName}.animation.json`;
         const sidecarPath = safePath ? `${safePath}/${sidecarFile}` : sidecarFile;
-        // Only emit if the asset actually rendered (sidecar is in
-        // createdFiles only when the sheet was added successfully).
+        // Only emit if the sheet actually rendered. createdFiles
+        // holds only committed outputs (reservations live in
+        // reservedSidecars), so this guards against failed sheets.
         if (!createdFiles.includes(sheetPath)) continue;
-        // If the user provided an explicit file with the same name, we
-        // reserved the sidecar path in the main loop but never wrote
-        // the sheet — skip the sidecar in that case too.
-        if (!createdFiles.includes(sidecarPath)) continue;
+        // The main loop reserved this sidecar only when the path
+        // was free. If it's not in our reservation set, a prior
+        // asset already wrote a file there — leave it alone.
+        if (!reservedSidecars.has(sidecarPath)) continue;
         const totalFrames = asset.rows * asset.columns;
         const fps = Math.round(1000 / sa.frame_duration_ms);
         zip.file(
