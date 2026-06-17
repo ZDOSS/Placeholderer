@@ -9,7 +9,7 @@ jobs:
   build:
     name: pnpm build
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -31,8 +31,12 @@ jobs:
       - name: Test
         run: pnpm test
 
+      # Skip --with-deps: the ubuntu-latest image already has the
+      # system libraries Playwright's bundled chromium needs, and
+      # --with-deps pulls heavy font packages via apt-get that
+      # routinely blow past the job's wall-clock budget in CI.
       - name: Install Playwright browser
-        run: npx playwright install --with-deps chromium
+        run: npx playwright install chromium
 
       - name: e2e
         run: pnpm e2e

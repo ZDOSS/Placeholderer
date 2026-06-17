@@ -339,7 +339,7 @@ function App() {
                         <div>
                           <strong>{asset.name}</strong>
                           <span style={{ color: colors.textMuted, marginLeft: '0.75rem' }}>
-                            {asset.kind} • {asset.width}×{asset.height}
+                            {asset.kind} • {describeAssetSize(asset)}
                           </span>
                         </div>
                         <div style={{ color: colors.textDim, fontSize: '0.85rem' }}>{asset.output_path}</div>
@@ -517,6 +517,18 @@ function Stat({ label, value }: { label: string; value: string }) {
       <div style={{ fontSize: '1.1rem', fontWeight: 500, color: colors.text }}>{value}</div>
     </div>
   );
+}
+
+/** Compact size/duration label for the job overview asset row.
+ *  Image-style assets show width×height; audio is dimensionless
+ *  so we surface duration + sample rate instead of printing
+ *  "undefined×undefined". */
+function describeAssetSize(asset: Asset): string {
+  if (asset.kind === 'audio') {
+    const sr = (asset as any).sample_rate ?? 44100;
+    return `${asset.duration}s @ ${sr}Hz`;
+  }
+  return `${asset.width}×${asset.height}`;
 }
 
 export default App;

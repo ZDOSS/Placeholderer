@@ -551,12 +551,34 @@ function layerToSVG(layer: Layer): { markup: string; filter: FilterSpec | null; 
     : `fill="${fillToColor(layer.fill, '#4A5568')}"`;
 
   if (clipImage) {
-    // The shape itself is hidden; the clipped <image> replaces it.
-    // Apply opacity/transform via a wrapper <g> so the clip stays
-    // in shape-local coordinates. The clip id comes from the same
-    // helper that produced the <clipPath> def, so numeric layer
-    // ids can never desync the two.
-    const g = `<g${opacity}${transform}${filterAttr} clip-path="url(#${clipImage.clipId})">${clipImage.imageMarkup}</g>`;
+    // The shape's body is replaced by a clipped <image>. Wrap the
+    // image in a <g> for opacity/transform/filter so they apply to
+    // both the image and the stroke below. The clip id comes from
+    // the same helper that produced the <clipPath> def so numeric
+    // layer ids can never desync.
+    //
+    // Emit the stroke as a separate shape (no fill) drawn on top,
+    // so the layer's stroke border is preserved when the fill is a
+    // stretched bitmap. Without this, a rect/circle/filled-shape
+    // layer with fill.mode === 'stretch' exports the image but
+    // silently drops its border.
+    let strokeShape = '';
+    if (stroke) {
+      switch (layer.type) {
+        case 'rect':
+          strokeShape = `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="none" stroke="${escapeXML(stroke.color)}" stroke-width="${stroke.width}"/>`;
+          break;
+        case 'circle':
+          strokeShape = `<ellipse cx="${x + w / 2}" cy="${y + h / 2}" rx="${w / 2}" ry="${h / 2}" fill="none" stroke="${escapeXML(stroke.color)}" stroke-width="${stroke.width}"/>`;
+          break;
+        case 'filled-shape': {
+          const r = Math.min(8, w / 4, h / 4);
+          strokeShape = `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${r}" ry="${r}" fill="none" stroke="${escapeXML(stroke.color)}" stroke-width="${stroke.width}"/>`;
+          break;
+        }
+      }
+    }
+    const g = `<g${opacity}${transform}${filterAttr} clip-path="url(#${clipImage.clipId})">${clipImage.imageMarkup}${strokeShape}</g>`;
     return { markup: `  ${g}`, filter, fill: null, clipDef: clipImage.clipDef };
   }
 
