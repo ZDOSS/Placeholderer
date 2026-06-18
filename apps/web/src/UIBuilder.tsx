@@ -11,7 +11,8 @@ import {
 } from '@placeholderer/schemas';
 import { validateBuilderRecipe } from '@placeholderer/core';
 import { colors } from './colors';
-import { renderLayer, exportSVG, preloadRasterImages, type SupportedExportFormat } from './builderRender';
+import { renderLayer, exportSVG, preloadRasterImages, rasterCache, type SupportedExportFormat } from './builderRender';
+import { PRESETS } from './builderPresets';
 
 const STORAGE_KEY = 'placeholderer:builder';
 const HISTORY_LIMIT = 5;
@@ -158,6 +159,51 @@ export function UIBuilder() {
   // Persist on every state change
   useEffect(() => { saveToStorage(state); }, [state]);
 
+  // Tick that increments each time an image fill (or raster layer)
+  // finishes loading. The render effect below depends on this so the
+  // canvas re-draws when the new image becomes available instead of
+  // waiting for the next user interaction.
+  const [preloadTick, setPreloadTick] = useState(0);
+
+  // Preload every image source referenced by the layer stack so the
+  // live preview shows the actual image (not just the fallback fill)
+  // the moment the user picks one. The export path also awaits this
+  // helper; the on-screen render only needs the cache to be warm.
+  useEffect(() => {
+    let cancelled = false;
+    const sources = new Set<string>();
+    for (const layer of state.layers) {
+      if (layer.type === 'raster' && layer.rasterSrc) sources.add(layer.rasterSrc);
+      const fill: any = (layer as any).fill;
+      if (fill && typeof fill === 'object' && fill.type === 'image' && fill.src) {
+        sources.add(fill.src);
+      }
+    }
+    for (const src of sources) {
+      // Skip sources that already finished loading. The cache is the
+      // only signal drawImageFillOverlay and drawRaster trust, so we
+      // don't put an Image in it until onload has actually fired —
+      // that way an in-flight load stays invisible (and drawImage
+      // doesn't get handed a half-loaded image).
+      const existing = rasterCache.get(src);
+      if (existing && existing.complete && existing.naturalWidth > 0) continue;
+      const img = new Image();
+      img.onload = () => {
+        if (cancelled) return;
+        rasterCache.set(src, img);
+        setPreloadTick((t) => t + 1);
+      };
+      img.onerror = () => {
+        if (cancelled) return;
+        // Don't cache failures. The render effect will keep using
+        // the fallback fill.
+        setPreloadTick((t) => t + 1);
+      };
+      img.src = src;
+    }
+    return () => { cancelled = true; };
+  }, [state.layers]);
+
   // Snap helper
   const snap = useCallback((v: number): number => {
     if (!state.snapEnabled) return v;
@@ -244,7 +290,7 @@ export function UIBuilder() {
         ctx.strokeRect(x - 2, y - 2, w + 4, h + 4);
       }
     }
-  }, [state, selectedId, colors]);
+  }, [state, selectedId, colors, preloadTick]);
 
   const addLayer = (factory: () => Layer) => {
     const layer = factory();
@@ -481,13 +527,22 @@ export function UIBuilder() {
 
   const selectedLayer = state.layers.find((l) => l.id === selectedId) ?? null;
 
-  const presets = [
-    { name: 'Button', factory: () => rectLayer({ name: 'Button', x: 100, y: 100, width: 160, height: 48, fill: '#4A5568' }) },
-    { name: 'Panel', factory: () => rectLayer({ name: 'Panel', x: 60, y: 60, width: 400, height: 240, fill: '#2D3748' }) },
-    { name: 'Title Text', factory: () => textLayer({ name: 'Title', x: 100, y: 100, width: 280, height: 40, content: 'Title' }) },
-    { name: 'Circle Badge', factory: () => circleLayer({ name: 'Badge', x: 100, y: 100, width: 96, height: 96, fill: '#4A5568' }) },
-    { name: 'Divider', factory: () => lineLayer({ name: 'Divider', x: 60, y: 200, width: 240, height: 4 }) },
-  ];
+  // Engine-aware presets grouped by engine for the preset picker.
+  const presets = PRESETS.map((p) => ({
+    name: p.name,
+    engine: p.engine,
+    factory: () => {
+      // Apply the preset: replace the canvas size and append the
+      // preset's layers to the current stack.
+      const layers: Layer[] = p.layers.map((l) => ({ ...l, id: makeId() }));
+      pushHistory({
+        ...state,
+        width: p.width,
+        height: p.height,
+        layers: [...state.layers, ...layers],
+      });
+    },
+  }));
 
   return (
     <div style={{ padding: '1rem', color: colors.text, height: 'calc(100vh - 140px)' }}>
@@ -557,14 +612,27 @@ export function UIBuilder() {
             <button onClick={importRaster} style={btnSecondary(colors)}>Import Image</button>
           </div>
 
-          {/* Presets */}
+          {/* Presets, grouped by engine */}
           <div style={{ marginBottom: '1rem' }}>
             <div style={{ fontSize: '0.8rem', color: colors.textDim, marginBottom: '0.35rem' }}>Presets</div>
-            {presets.map((p) => (
-              <button key={p.name} onClick={() => addLayer(p.factory)} style={{ ...btnSecondary(colors), marginRight: '0.3rem', marginBottom: '0.3rem' }}>
-                {p.name}
-              </button>
-            ))}
+            {(['Godot', 'Unity', 'Unreal', 'Common'] as const).map((engine) => {
+              const enginePresets = presets.filter((p) => p.engine === engine);
+              if (enginePresets.length === 0) return null;
+              return (
+                <div key={engine} style={{ marginBottom: '0.4rem' }}>
+                  <div style={{ fontSize: '0.7rem', color: colors.textDim, marginBottom: '0.2rem' }}>{engine}</div>
+                  {enginePresets.map((p) => (
+                    <button
+                      key={p.name}
+                      onClick={p.factory}
+                      style={{ ...btnSecondary(colors), marginRight: '0.25rem', marginBottom: '0.25rem', fontSize: '0.8rem' }}
+                    >
+                      {p.name}
+                    </button>
+                  ))}
+                </div>
+              );
+            })}
           </div>
 
           {/* Layers */}
@@ -709,9 +777,60 @@ function PropertiesPanel({ layer, onUpdate, colors }: PropertiesPanelProps) {
         <input type="number" value={layer.rotation ?? 0} onChange={(e) => onUpdate({ rotation: parseFloat(e.target.value) || 0 })} style={inputStyle(colors)} />
       </Field>
 
-      <Field label="Fill color">
-        <input type="color" value={fillColor} onChange={(e) => onUpdate({ fill: e.target.value })} style={{ ...inputStyle(colors), padding: 0, height: 28 }} />
+      <Field label="Fill mode">
+        <select
+          value={typeof layer.fill === 'string' || !layer.fill ? 'solid' : (layer.fill as any).type ?? 'solid'}
+          onChange={(e) => {
+            const mode = e.target.value;
+            if (mode === 'solid') onUpdate({ fill: '#4A5568' });
+            else if (mode === 'pattern') onUpdate({ fill: { type: 'pattern', pattern: 'checkerboard' } });
+            else if (mode === 'image') onUpdate({ fill: { type: 'image', src: '', mode: 'repeat' } });
+          }}
+          style={inputStyle(colors)}
+        >
+          <option value="solid">Solid</option>
+          <option value="pattern">Pattern</option>
+          <option value="image">Image</option>
+        </select>
       </Field>
+
+      {typeof layer.fill === 'object' && layer.fill && (layer.fill as any).type === 'pattern' && (
+        <Field label="Pattern">
+          <select
+            value={(layer.fill as any).pattern}
+            onChange={(e) => onUpdate({ fill: { type: 'pattern', pattern: e.target.value as any } })}
+            style={inputStyle(colors)}
+          >
+            <option value="checkerboard">Checkerboard</option>
+            <option value="stripes">Stripes</option>
+            <option value="diagonal">Diagonal</option>
+          </select>
+        </Field>
+      )}
+
+      {typeof layer.fill === 'object' && layer.fill && (layer.fill as any).type === 'image' && (
+        <>
+          <Field label="Image src" wide>
+            <input value={(layer.fill as any).src ?? ''} onChange={(e) => onUpdate({ fill: { type: 'image', src: e.target.value, mode: (layer.fill as any).mode ?? 'repeat' } })} style={inputStyle(colors)} />
+          </Field>
+          <Field label="Mode">
+            <select
+              value={(layer.fill as any).mode ?? 'repeat'}
+              onChange={(e) => onUpdate({ fill: { type: 'image', src: (layer.fill as any).src ?? '', mode: e.target.value as any } })}
+              style={inputStyle(colors)}
+            >
+              <option value="repeat">Repeat</option>
+              <option value="stretch">Stretch</option>
+            </select>
+          </Field>
+        </>
+      )}
+
+      {(typeof layer.fill === 'string' || !layer.fill) && (
+        <Field label="Fill color">
+          <input type="color" value={fillColor} onChange={(e) => onUpdate({ fill: e.target.value })} style={{ ...inputStyle(colors), padding: 0, height: 28 }} />
+        </Field>
+      )}
 
       <Field label="Stroke color">
         <input type="color" value={strokeColor || '#000000'} onChange={(e) => onUpdate({ stroke: { ...(layer.stroke ?? {}), color: e.target.value } })} style={{ ...inputStyle(colors), padding: 0, height: 28 }} />
@@ -724,6 +843,39 @@ function PropertiesPanel({ layer, onUpdate, colors }: PropertiesPanelProps) {
       <Field label="Shadow blur">
         <input type="number" value={shadowBlur} min={0} onChange={(e) => onUpdate({ effects: { ...(layer.effects ?? {}), shadow: { ...(layer.effects?.shadow ?? {}), blur: parseInt(e.target.value) || 0, color: shadowColor || 'rgba(0,0,0,0.5)' } } })} style={inputStyle(colors)} />
       </Field>
+
+      <Field label="Glow blur">
+        <input
+          type="number"
+          value={layer.effects?.glow?.blur ?? ''}
+          min={0}
+          onChange={(e) => {
+            const v = parseInt(e.target.value) || 0;
+            if (v === 0) {
+              const { glow, ...rest } = layer.effects ?? {};
+              onUpdate({ effects: Object.keys(rest).length ? rest : undefined });
+            } else {
+              onUpdate({ effects: { ...(layer.effects ?? {}), glow: { blur: v, color: layer.effects?.glow?.color ?? 'rgba(255,255,255,0.6)' } } });
+            }
+          }}
+          style={inputStyle(colors)}
+        />
+      </Field>
+
+      {layer.effects?.glow && (
+        <Field label="Glow color">
+          <input
+            type="color"
+            value={glowColorToHex(layer.effects.glow.color)}
+            onChange={(e) => {
+              const effects = layer.effects ?? {};
+              const glow = effects.glow ?? { blur: 8 };
+              onUpdate({ effects: { ...effects, glow: { ...glow, color: hexToRgba(e.target.value, glow.color) } } });
+            }}
+            style={{ ...inputStyle(colors), padding: 0, height: 28 }}
+          />
+        </Field>
+      )}
 
       <Field label="Opacity">
         <input type="range" min="0" max="1" step="0.05" value={layer.opacity ?? 1} onChange={(e) => onUpdate({ opacity: parseFloat(e.target.value) })} style={{ width: '100%' }} />
@@ -772,6 +924,44 @@ function Field({ label, children, wide }: { label: string; children: React.React
       {children}
     </div>
   );
+}
+
+/** Convert any CSS color to a #rrggbb hex so a native color picker
+ *  can edit it. Falls back to white if we can't parse it. */
+function glowColorToHex(color: string | undefined): string {
+  if (!color) return '#ffffff';
+  if (color.startsWith('#')) {
+    if (color.length === 7) return color;
+    if (color.length === 4) {
+      return '#' + color.slice(1).split('').map((c) => c + c).join('');
+    }
+    return color.slice(0, 7);
+  }
+  return '#ffffff';
+}
+
+/** Convert a hex color picked by the native input to an rgba string,
+ *  preserving the alpha of an existing glow color when present. */
+export function hexToRgba(hex: string, existing: string | undefined): string {
+  const m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex);
+  if (!m) return existing ?? 'rgba(255,255,255,0.6)';
+  const r = parseInt(m[1], 16), g = parseInt(m[2], 16), b = parseInt(m[3], 16);
+  // Only carry the alpha forward when the existing color is a
+  // true rgba(...)/hsla(...) value with a 4th component. For
+  // rgb(...) / hsl(...) / hex without alpha, the regex would
+  // otherwise grab the last numeric component and treat it as
+  // alpha (e.g. rgb(10,20,30) would extract "30" and produce
+  // rgba(...,...,...,30), which is outside the valid 0..1 range
+  // and silently fails to render).
+  const alphaMatch = existing
+    ? existing.match(/^rgba?\([^)]*\)\s*$/) || existing.match(/^hsla?\([^)]*\)\s*$/)
+    : null;
+  let alpha = '0.6';
+  if (alphaMatch) {
+    const nums = existing!.match(/-?\d*\.?\d+/g);
+    if (nums && nums.length === 4) alpha = nums[3];
+  }
+  return `rgba(${r},${g},${b},${alpha})`;
 }
 
 function inputStyle(colors: typeof import('./colors').colors) {

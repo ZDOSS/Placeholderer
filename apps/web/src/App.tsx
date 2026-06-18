@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { validateManifest, generateJob, type CanvasBackend, type Canvas2D } from '@placeholderer/core';
+import { validateManifest, generateJob, type CanvasBackend, type Canvas2D, type GenerationReport } from '@placeholderer/core';
 import type { Manifest, Asset, SafeAdjustment } from '@placeholderer/schemas';
 import { AssetPreview } from './AssetPreview';
 import { UIBuilder } from './UIBuilder';
@@ -7,6 +7,7 @@ import { Templates } from './Templates';
 import { CSVImport } from './CSVImport';
 import { useTheme } from './useTheme';
 import { colors } from './colors';
+import { readZipEntry } from './zipParser';
 
 // Browser canvas backend: wraps OffscreenCanvas so the shared core
 // can run without knowing it's in a browser.
@@ -36,6 +37,7 @@ function App() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [importMode, setImportMode] = useState<'json' | 'csv'>('json');
   const [lastReport, setLastReport] = useState<any>(null);
+  const [manifestReport, setManifestReport] = useState<GenerationReport | null>(null);
   const { theme, toggle: toggleTheme } = useTheme();
 
   const handlePaste = (text: string) => {
@@ -44,6 +46,10 @@ function App() {
       const result = validateManifest(parsed);
 
       if (result.valid) {
+        // Clear any report from the previous job so the user
+        // doesn't see stale folders/files alongside the new
+        // manifest's overview.
+        setManifestReport(null);
         setJob(parsed as Manifest);
         setView('overview');
         setError(null);
@@ -57,6 +63,7 @@ function App() {
   };
 
   const handleCSVImport = (data: any) => {
+    setManifestReport(null);
     setJob(data);
     setView('overview');
   };
@@ -99,6 +106,10 @@ function App() {
   const handleGenerate = async () => {
     if (!job) return;
     setIsGenerating(true);
+    // Drop any report from a previous successful generation so the
+    // user can't see stale folders/files when the new generation
+    // fails or produces a different job.
+    setManifestReport(null);
     try {
       const result = await generateJob(job, webCanvasBackend);
       setLastReport(result);
@@ -114,7 +125,24 @@ function App() {
         a.download = result.suggestedName ?? 'placeholders.zip';
         a.click();
         URL.revokeObjectURL(url);
+
+        // Pull the embedded manifest report out of the ZIP so the
+        // user can see what was produced. The decoder is a small
+        // standalone helper in ./zipParser.
+        try {
+          const entry = readZipEntry(bytes, '_placeholderer/manifest-report.json');
+          if (entry) {
+            const text = new TextDecoder().decode(entry.bytes);
+            setManifestReport(JSON.parse(text) as GenerationReport);
+          }
+        } catch {
+          // Manifest is best-effort.
+        }
       } else {
+        // Surface the new error but also wipe any stale report so
+        // the user can't see the previous job's folders/files
+        // alongside the new error state.
+        setManifestReport(null);
         setError(result.errors.join('\n'));
       }
     } catch (e: any) {
@@ -256,7 +284,7 @@ function App() {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
               <h2 style={{ margin: 0 }}>Job Overview — {job.job?.name || 'Unnamed Job'}</h2>
               <button
-                onClick={() => { setView('home'); setJob(null); setLastReport(null); }}
+                onClick={() => { setView('home'); setJob(null); setLastReport(null); setManifestReport(null); }}
                 style={{ padding: '0.5rem 1rem', background: colors.bgInset, color: colors.text, border: 'none', borderRadius: '6px' }}
               >
                 New Job
@@ -311,7 +339,7 @@ function App() {
                         <div>
                           <strong>{asset.name}</strong>
                           <span style={{ color: colors.textMuted, marginLeft: '0.75rem' }}>
-                            {asset.kind} • {asset.width}×{asset.height}
+                            {asset.kind} • {describeAssetSize(asset)}
                           </span>
                         </div>
                         <div style={{ color: colors.textDim, fontSize: '0.85rem' }}>{asset.output_path}</div>
@@ -351,6 +379,52 @@ function App() {
                 {lastReport.errors?.length > 0 && (
                   <div style={{ marginTop: '0.75rem', color: colors.errorText }}>
                     {lastReport.errors.join('\n')}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {manifestReport && (
+              <div style={{
+                marginTop: '1.5rem',
+                padding: '1.25rem',
+                background: colors.bgElevated,
+                border: `1px solid ${colors.border}`,
+                borderRadius: '8px',
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+                  <strong>Manifest report</strong>
+                  <button
+                    onClick={() => setManifestReport(null)}
+                    style={{ background: 'none', border: 'none', color: colors.textMuted, cursor: 'pointer' }}
+                  >
+                    ×
+                  </button>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '0.75rem', marginBottom: '0.75rem' }}>
+                  <Stat label="Job" value={manifestReport.jobName || '(unnamed)'} />
+                  <Stat label="Total" value={String(manifestReport.totalAssets)} />
+                  <Stat label="Successful" value={String(manifestReport.successful)} />
+                  <Stat label="Failed" value={String(manifestReport.failed)} />
+                </div>
+                {manifestReport.createdFolders.length > 0 && (
+                  <div style={{ marginBottom: '0.5rem' }}>
+                    <div style={{ fontSize: '0.8rem', color: colors.textMuted, marginBottom: '0.25rem' }}>Folders ({manifestReport.createdFolders.length})</div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.3rem' }}>
+                      {manifestReport.createdFolders.map((f: string) => (
+                        <code key={f} style={{ padding: '0.15rem 0.4rem', background: colors.bgInset, borderRadius: '4px', fontSize: '0.75rem' }}>{f}</code>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {manifestReport.createdFiles.length > 0 && (
+                  <div>
+                    <div style={{ fontSize: '0.8rem', color: colors.textMuted, marginBottom: '0.25rem' }}>Files ({manifestReport.createdFiles.length})</div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.3rem' }}>
+                      {manifestReport.createdFiles.map((f: string) => (
+                        <code key={f} style={{ padding: '0.15rem 0.4rem', background: colors.bgInset, borderRadius: '4px', fontSize: '0.75rem' }}>{f}</code>
+                      ))}
+                    </div>
                   </div>
                 )}
               </div>
@@ -434,6 +508,27 @@ function App() {
       </div>
     </div>
   );
+}
+
+function Stat({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <div style={{ fontSize: '0.75rem', color: '#94a3b8' }}>{label}</div>
+      <div style={{ fontSize: '1.1rem', fontWeight: 500, color: colors.text }}>{value}</div>
+    </div>
+  );
+}
+
+/** Compact size/duration label for the job overview asset row.
+ *  Image-style assets show width×height; audio is dimensionless
+ *  so we surface duration + sample rate instead of printing
+ *  "undefined×undefined". */
+function describeAssetSize(asset: Asset): string {
+  if (asset.kind === 'audio') {
+    const sr = (asset as any).sample_rate ?? 44100;
+    return `${asset.duration}s @ ${sr}Hz`;
+  }
+  return `${asset.width}×${asset.height}`;
 }
 
 export default App;

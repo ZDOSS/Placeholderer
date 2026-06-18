@@ -35,4 +35,7 @@ coverage/
 
 # Misc
 *.local
-.cache/
+
+# Playwright test cache
+test-results/
+playwright-report/

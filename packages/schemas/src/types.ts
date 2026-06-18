@@ -2,9 +2,9 @@
 // Single source of truth — apps should import from @placeholderer/schemas
 // rather than redefining these shapes locally.
 
-export type AssetKind = 'image' | 'sprite_sheet' | 'tileset' | 'ui_panel';
+export type AssetKind = 'image' | 'sprite_sheet' | 'tileset' | 'ui_panel' | 'audio';
 
-export type Format = 'png' | 'jpg' | 'jpeg' | 'webp';
+export type Format = 'png' | 'jpg' | 'jpeg' | 'webp' | 'wav';
 
 export type NumberingStyle = 'zero-padded' | 'plain' | 'none';
 
@@ -44,12 +44,13 @@ export interface JobMeta {
   defaults?: JobDefaults;
 }
 
-/** Fields shared by every asset kind. */
+/** Fields shared by every asset kind. Image-style assets also need
+ *  width/height; audio does not. */
 export interface BaseAsset {
   kind: AssetKind;
   name: string;
-  width: number;
-  height: number;
+  width?: number;
+  height?: number;
   format: Format;
   output_path: string;
   label_enabled?: boolean;
@@ -60,33 +61,55 @@ export interface BaseAsset {
   custom_fill_image?: string;
 }
 
-export interface ImageAsset extends BaseAsset {
+/** BaseAsset plus the image dimensions, which every image-style
+ *  asset (image, sprite_sheet, tileset, ui_panel) requires. */
+export interface DimensionalAsset extends BaseAsset {
+  width: number;
+  height: number;
+}
+
+export interface ImageAsset extends DimensionalAsset {
   kind: 'image';
 }
 
-export interface SpriteSheetAsset extends BaseAsset {
+export interface SpriteSheetAsset extends DimensionalAsset {
   kind: 'sprite_sheet';
   frame_width: number;
   frame_height: number;
   rows: number;
   columns: number;
   show_grid?: boolean;
+  /** Per-frame duration in milliseconds. When set, the generator
+   *  writes an animation.json sidecar with the timing data. */
+  frame_duration_ms?: number;
 }
 
-export interface TilesetAsset extends BaseAsset {
+export interface TilesetAsset extends DimensionalAsset {
   kind: 'tileset';
   tile_width: number;
   tile_height: number;
 }
 
-export interface UiPanelAsset extends BaseAsset {
+export interface UiPanelAsset extends DimensionalAsset {
   kind: 'ui_panel';
   frame_style?: FrameStyle;
   panel_guides?: boolean;
   export_panel_metadata?: boolean;
 }
 
-export type Asset = ImageAsset | SpriteSheetAsset | TilesetAsset | UiPanelAsset;
+export interface AudioAsset extends BaseAsset {
+  kind: 'audio';
+  /** Tone frequency in Hz. */
+  frequency: number;
+  /** Duration in seconds. */
+  duration: number;
+  /** Sample rate in Hz. Defaults to 44100. */
+  sample_rate?: number;
+  /** Peak amplitude 0..1. Defaults to 0.5. */
+  amplitude?: number;
+}
+
+export type Asset = ImageAsset | SpriteSheetAsset | TilesetAsset | UiPanelAsset | AudioAsset;
 
 export interface Request {
   name?: string;
