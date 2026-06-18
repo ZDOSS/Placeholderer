@@ -120,4 +120,34 @@ test.describe('Placeholderer web app', () => {
     const staleReport = page.locator('strong', { hasText: 'Manifest report' });
     await expect(staleReport).toHaveCount(0);
   });
+
+  test('UI Builder presets are hidden behind a Presets button', async ({ page }) => {
+    // Regression for tier 4: engine-aware presets used to be
+    // visible inline in the right sidebar, which made it too easy
+    // to accidentally click one and trample in-progress work.
+    // They're now hidden behind a Presets button next to Clear;
+    // clicking it opens a popover.
+    await page.goto('/');
+    await page.getByRole('heading', { name: 'Import Manifest' }).waitFor();
+
+    // Open the UI Builder.
+    await page.getByRole('button', { name: 'UI Builder' }).click();
+    await page.getByRole('heading', { name: 'UI Builder' }).waitFor();
+
+    // The popover should NOT be open initially — no preset names
+    // are visible inline.
+    const dialog = page.locator('div[role="dialog"][aria-label="Engine-aware presets"]');
+    await expect(dialog).toHaveCount(0);
+
+    // Click the Presets button to open the popover.
+    await page.getByRole('button', { name: 'Presets' }).click();
+    await expect(dialog).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Dialog Window' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Health Bar' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Crosshair' })).toBeVisible();
+
+    // Click outside to dismiss.
+    await page.locator('h2', { hasText: 'UI Builder' }).click();
+    await expect(dialog).toHaveCount(0);
+  });
 });

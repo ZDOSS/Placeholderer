@@ -20,6 +20,7 @@ import {
 import type { CanvasBackend } from './canvas.js';
 import { buildReport, type GenerationReport } from './report.js';
 import { generateAudio } from './audio.js';
+import { renderBuilderRecipe } from './builderRender.js';
 
 export interface GenerateResult {
   success: boolean;
@@ -137,6 +138,21 @@ export async function generateJob(
         let bytes: Uint8Array;
         if (asset.kind === 'audio') {
           bytes = generateAudio(asset as AudioAsset);
+        } else if ((asset as any).builder_recipe) {
+          // When the asset carries a UI Builder recipe, render the
+          // recipe's layer stack instead of the standard placeholder
+          // grid. The recipe's own width/height (if set) overrides
+          // the asset's canvas bounds so a recipe authored at a
+          // different size than the manifest request still ships.
+          const recipe = (asset as any).builder_recipe;
+          const recipeW = recipe.width ?? asset.width;
+          const recipeH = recipe.height ?? asset.height;
+          const handle = backend.createCanvas(recipeW, recipeH);
+          renderBuilderRecipe(
+            { ctx: handle.ctx, width: recipeW, height: recipeH },
+            recipe,
+          );
+          bytes = await handle.encode(formatToMime(asset.format));
         } else {
           const handle = backend.createCanvas(asset.width, asset.height);
           drawAsset(asset, {

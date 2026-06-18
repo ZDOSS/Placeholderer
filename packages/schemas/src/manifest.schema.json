@@ -89,7 +89,8 @@
           "required": ["kind", "width", "height"],
           "properties": {
             "kind": { "const": "image" },
-            "format": { "type": "string", "enum": ["png", "jpg", "jpeg", "webp", "bmp", "gif"] }
+            "format": { "type": "string", "enum": ["png", "jpg", "jpeg", "webp", "bmp", "gif"] },
+            "builder_recipe": { "$ref": "https://placeholderer.dev/schemas/builder-recipe/v1" }
           }
         }
       ]
@@ -108,7 +109,8 @@
             "rows": { "type": "integer", "minimum": 1 },
             "columns": { "type": "integer", "minimum": 1 },
             "show_grid": { "type": "boolean", "default": true },
-            "frame_duration_ms": { "type": "number", "minimum": 1, "maximum": 10000, "description": "Per-frame duration in ms; when set, the generator emits an animation.json sidecar" }
+            "frame_duration_ms": { "type": "number", "minimum": 1, "maximum": 10000, "description": "Per-frame duration in ms; when set, the generator emits an animation.json sidecar" },
+            "builder_recipe": { "$ref": "https://placeholderer.dev/schemas/builder-recipe/v1" }
           }
         }
       ]
@@ -123,7 +125,8 @@
             "kind": { "const": "tileset" },
             "format": { "type": "string", "enum": ["png", "jpg", "jpeg", "webp", "bmp", "gif"] },
             "tile_width": { "type": "integer", "minimum": 1 },
-            "tile_height": { "type": "integer", "minimum": 1 }
+            "tile_height": { "type": "integer", "minimum": 1 },
+            "builder_recipe": { "$ref": "https://placeholderer.dev/schemas/builder-recipe/v1" }
           }
         }
       ]
@@ -139,7 +142,8 @@
             "format": { "type": "string", "enum": ["png", "jpg", "jpeg", "webp", "bmp", "gif"] },
             "frame_style": { "type": "string", "enum": ["simple", "beveled", "inset", "outlined"] },
             "panel_guides": { "type": "boolean", "default": false },
-            "export_panel_metadata": { "type": "boolean", "default": false }
+            "export_panel_metadata": { "type": "boolean", "default": false },
+            "builder_recipe": { "$ref": "https://placeholderer.dev/schemas/builder-recipe/v1" }
           }
         }
       ]

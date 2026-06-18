@@ -16,6 +16,9 @@ export interface ValidationResult {
 
 const ajv = new Ajv({ allErrors: true, strict: true, allowUnionTypes: true });
 
+// Register the builder-recipe schema first so the manifest's
+// `$ref` to it can be resolved at compile time.
+ajv.addSchema(builderRecipeSchema);
 const manifestValidator: ValidateFunction = ajv.compile(manifestSchema);
 const builderRecipeValidator: ValidateFunction = ajv.compile(builderRecipeSchema);
 

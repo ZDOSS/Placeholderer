@@ -66,6 +66,11 @@ export interface BaseAsset {
 export interface DimensionalAsset extends BaseAsset {
   width: number;
   height: number;
+  /** Optional UI Builder recipe. When present, generateJob renders
+   *  the asset by feeding the recipe through the canvas renderer
+   *  instead of the standard placeholder grid. Image-style assets
+   *  only — audio is dimensionless and doesn't have a recipe. */
+  builder_recipe?: BuilderRecipe;
 }
 
 export interface ImageAsset extends DimensionalAsset {
