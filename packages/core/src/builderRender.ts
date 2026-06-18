@@ -133,14 +133,13 @@ function drawFilledShape(ctx: Canvas2D, layer: any, x: number, y: number, w: num
   }
 }
 
-function drawRaster(_ctx: Canvas2D, _layer: any, _x: number, _y: number, _w: number, _h: number): void {
-  // Raster layers need an image source — skipped in core. The web
-  // path handles these via its full renderer.
-}
-
 /** Render a single layer onto a 2D context. Mirrors the switch in
  *  apps/web/src/builderRender.ts but without image preloads, pattern
- *  fills, SVG export, or any browser-only globals. */
+ *  fills, SVG export, or any browser-only globals. Throws when it
+ *  encounters a feature the core renderer doesn't support (image
+ *  fills, pattern fills, raster layers); generateJob catches the
+ *  throw and records a per-asset error so the manifest report
+ *  surfaces the missing capability. */
 export function renderLayer(dc: DrawContext, layer: Layer): void {
   if (!layer.visible) return;
   const { ctx } = dc;
@@ -164,30 +163,42 @@ export function renderLayer(dc: DrawContext, layer: Layer): void {
     ctx.translate(-cx, -cy);
   }
 
-  try {
-    switch (layer.type) {
-      case 'rect':
-        drawRect(ctx, layer, x, y, w, h);
-        break;
-      case 'circle':
-        drawCircle(ctx, layer, cx, cy, w, h);
-        break;
-      case 'line':
-        drawLine(ctx, layer, x, y, w, h);
-        break;
-      case 'text':
-        drawText(ctx, layer, x, y, w, h);
-        break;
-      case 'raster':
-        drawRaster(ctx, layer, x, y, w, h);
-        break;
-      case 'filled-shape':
-        drawFilledShape(ctx, layer, x, y, w, h);
-        break;
+  // Reject unsupported layer features outright instead of silently
+  // rendering a fallback. generateJob catches these and emits a
+  // per-asset error so the manifest report surfaces the missing
+  // capability rather than shipping incomplete bytes.
+  const fill: any = (layer as any).fill;
+  if (fill && typeof fill === 'object') {
+    if (fill.type === 'image') {
+      throw new Error(`layer "${(layer as any).name}" uses an image fill, which the core renderer does not support`);
     }
-  } catch {
-    // Swallow per-layer errors so one bad layer doesn't kill the
-    // whole asset render.
+    if (fill.type === 'pattern') {
+      throw new Error(`layer "${(layer as any).name}" uses a pattern fill, which the core renderer does not support`);
+    }
+  }
+
+  switch (layer.type) {
+    case 'rect':
+      drawRect(ctx, layer, x, y, w, h);
+      break;
+    case 'circle':
+      drawCircle(ctx, layer, cx, cy, w, h);
+      break;
+    case 'line':
+      drawLine(ctx, layer, x, y, w, h);
+      break;
+    case 'text':
+      drawText(ctx, layer, x, y, w, h);
+      break;
+    case 'raster':
+      // Raster layers need an image source; core has no decoder.
+      // Fail loudly so the manifest report lists this asset as
+      // failed instead of shipping a placeholder where the image
+      // should be.
+      throw new Error(`layer "${(layer as any).name}" is a raster layer, which the core renderer does not support`);
+    case 'filled-shape':
+      drawFilledShape(ctx, layer, x, y, w, h);
+      break;
   }
 
   clearEffects(ctx);

@@ -165,13 +165,15 @@ export function UIBuilder() {
   // Persist on every state change
   useEffect(() => { saveToStorage(state); }, [state]);
 
-  // Close the presets popover when clicking anywhere outside it.
+  // Close the presets popover when clicking anywhere outside it
+  // (including the trigger button — otherwise mousedown on the
+  // button closes it before the click handler reopens it).
   // Cheap global listener; only does work while the popover is open.
   useEffect(() => {
     if (!presetsOpen) return;
     const handler = (e: MouseEvent) => {
       const target = e.target as HTMLElement | null;
-      if (target && target.closest('[data-presets-popover]')) return;
+      if (target && (target.closest('[data-presets-popover]') || target.closest('[data-presets-trigger]'))) return;
       setPresetsOpen(false);
     };
     document.addEventListener('mousedown', handler);
@@ -618,7 +620,7 @@ export function UIBuilder() {
           Snap
         </label>
         <button onClick={clearRecipe} style={{ ...btnSecondary(colors), marginLeft: 'auto' }}>Clear</button>
-        <button onClick={() => setPresetsOpen((o) => !o)} style={btnSecondary(colors)} aria-expanded={presetsOpen} aria-haspopup="dialog">
+        <button data-presets-trigger onClick={() => setPresetsOpen((o) => !o)} style={btnSecondary(colors)} aria-expanded={presetsOpen} aria-haspopup="dialog">
           Presets
         </button>
         {presetsOpen && (

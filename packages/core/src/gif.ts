@@ -50,6 +50,11 @@ function buildPalette(): Uint8ClampedArray {
 // the nearest cube entry is found by quantizing each channel to
 // 6 levels (0..5) — a single O(1) lookup instead of an O(PALETTE_SIZE)
 // scan. Greyscale entries get the same treatment.
+//
+// The returned index is always in 0..215 (the cube range). Index 255
+// is reserved for GIF transparency (see `transparentIndex` below) —
+// opaque RGB never produces it because rgbToIndex maps all opaque
+// RGB triples to cube indices 0..215.
 function rgbToIndex(r: number, g: number, b: number): number {
   // Quantize each channel to the nearest web-safe cube step.
   const rq = r === 0 ? 0 : Math.round(r / 51);
@@ -78,21 +83,31 @@ export function encodeGif(rgba: Uint8ClampedArray | Uint8Array, width: number, h
   const palette = buildPalette();
   const pixels = new Uint8Array(width * height);
 
-  // Quantize RGBA → palette index. Alpha < 128 → transparent (0).
-  // Palette index 0 is the first web-safe black entry; we overwrite
-  // it with the transparent entry.
-  const transparentIndex = 0;
+  // Reserve index 255 as the transparent slot. rgbToIndex maps
+  // every opaque RGB triple into the 216-entry web-safe cube
+  // (0..215), so 255 is never produced by an opaque pixel —
+  // opaque black (rgbToIndex(0,0,0)=0) and opaque white
+  // (rgbToIndex(255,255,255)=215) both stay clear of it. The
+  // grayscale ramp starts at index 216, so any "real" palette
+  // entry that lands on 255 would have to come from the ramp's
+  // last slot, which is grayscale (255,255,255) — also never
+  // produced by rgbToIndex.
+  const transparentIndex = 255;
+  let hasTransparent = false;
   for (let i = 0; i < pixels.length; i++) {
     const s = i * 4;
     if (rgba[s + 3] < 128) {
       pixels[i] = transparentIndex;
+      hasTransparent = true;
     } else {
       pixels[i] = rgbToIndex(rgba[s], rgba[s + 1], rgba[s + 2]);
     }
   }
-  // Set the transparent entry to black (0,0,0) so the GIF's
-  // transparency-mask lines up with our transparent pixels.
-  palette[0] = palette[1] = palette[2] = 0;
+  // Set the transparent entry's RGB to any sentinel — GIF viewers
+  // ignore the color value at the transparent index.
+  palette[transparentIndex * 3] = 0;
+  palette[transparentIndex * 3 + 1] = 0;
+  palette[transparentIndex * 3 + 2] = 0;
 
   // ---- LZW compression ----
   const minCodeSize = 8; // palette size 256 → min code size 8
@@ -180,8 +195,12 @@ export function encodeGif(rgba: Uint8ClampedArray | Uint8Array, width: number, h
   // Global Color Table (256 * 3 = 768 bytes)
   for (let i = 0; i < palette.length; i++) out.push(palette[i]);
 
-  // Graphics Control Extension — declare palette entry 0 as transparent.
-  out.push(0x21, 0xf9, 0x04, 0x01, 0x00, 0x00, transparentIndex, 0x00);
+  // Graphics Control Extension — only emit when at least one pixel
+  // is actually transparent. Fully-opaque GIFs skip this block
+  // so they don't carry unused transparency metadata.
+  if (hasTransparent) {
+    out.push(0x21, 0xf9, 0x04, 0x01, 0x00, 0x00, transparentIndex, 0x00);
+  }
 
   // Image Descriptor
   out.push(0x2c);

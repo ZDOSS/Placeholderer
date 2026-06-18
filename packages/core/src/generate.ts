@@ -139,6 +139,18 @@ export async function generateJob(
         if (asset.kind === 'audio') {
           bytes = generateAudio(asset as AudioAsset);
         } else if ((asset as any).builder_recipe) {
+          // A sprite_sheet with a builder_recipe and a frame_duration_ms
+          // would render as one still image but the sidecar pass
+          // would still emit animation.json claiming rows × columns
+          // frames. Consumers that slice on the sidecar would read
+          // the wrong image. Reject this combination up front so the
+          // manifest report surfaces the failure instead of shipping
+          // mismatched artifacts.
+          if (asset.kind === 'sprite_sheet') {
+            throw new Error(
+              `${asset.name}: sprite_sheet assets cannot carry a builder_recipe (the sidecar would mismatch the single rendered frame)`,
+            );
+          }
           // When the asset carries a UI Builder recipe, render the
           // recipe's layer stack instead of the standard placeholder
           // grid. The recipe's own width/height (if set) overrides

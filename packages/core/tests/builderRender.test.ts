@@ -124,18 +124,39 @@ describe('renderBuilderRecipe', () => {
     expect(rectCalls[0]).toContain('#ff0000');
   });
 
-  it('degrades image/pattern object fills to the fallback color', () => {
-    // Object fills (image/pattern) aren't supported in the core
-    // renderer — they should silently fall back to the fillToColor
-    // default rather than throw or draw nothing.
+  it('throws on image fill layers (no silent degradation)', () => {
+    // Image fills aren't supported in the core renderer — they
+    // should fail loudly so generateJob records a per-asset error
+    // instead of shipping a placeholder where the image should be.
     const layer: Layer = {
-      id: 'p1', type: 'rect', name: 'p', visible: true, locked: false,
+      id: 'p1', type: 'rect', name: 'image-bg', visible: true, locked: false,
       x: 0, y: 0, width: 10, height: 10,
       fill: { type: 'image', src: 'a.png', mode: 'stretch' },
     };
     const recipe: BuilderRecipe = { canvasMode: 'compact', width: 10, height: 10, layers: [layer] };
-    const { dc, calls } = makeRecordingCanvas(10, 10);
-    expect(() => renderBuilderRecipe(dc, recipe)).not.toThrow();
-    expect(calls.some((c) => c.startsWith('fillRect') && c.includes('#4A5568'))).toBe(true);
+    const { dc } = makeRecordingCanvas(10, 10);
+    expect(() => renderBuilderRecipe(dc, recipe)).toThrow(/image fill/);
+  });
+
+  it('throws on pattern fill layers', () => {
+    const layer: Layer = {
+      id: 'p2', type: 'rect', name: 'pattern-bg', visible: true, locked: false,
+      x: 0, y: 0, width: 10, height: 10,
+      fill: { type: 'pattern', pattern: 'checkerboard' },
+    };
+    const recipe: BuilderRecipe = { canvasMode: 'compact', width: 10, height: 10, layers: [layer] };
+    const { dc } = makeRecordingCanvas(10, 10);
+    expect(() => renderBuilderRecipe(dc, recipe)).toThrow(/pattern fill/);
+  });
+
+  it('throws on raster layers (no image decoder in core)', () => {
+    const layer: Layer = {
+      id: 'r1', type: 'raster', name: 'img', visible: true, locked: false,
+      x: 0, y: 0, width: 10, height: 10,
+      rasterSrc: 'a.png',
+    };
+    const recipe: BuilderRecipe = { canvasMode: 'compact', width: 10, height: 10, layers: [layer] };
+    const { dc } = makeRecordingCanvas(10, 10);
+    expect(() => renderBuilderRecipe(dc, recipe)).toThrow(/raster layer/);
   });
 });
