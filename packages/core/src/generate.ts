@@ -55,6 +55,8 @@ function formatToMime(format: Format): string {
       return 'image/jpeg';
     case 'bmp':
       return 'image/bmp';
+    case 'gif':
+      return 'image/gif';
     case 'webp':
       return 'image/webp';
     case 'png':

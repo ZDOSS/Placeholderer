@@ -7,3 +7,4 @@ export * from './report.js';
 export * from './engines.js';
 export * from './zip.js';
 export * from './bmp.js';
+export * from './gif.js';

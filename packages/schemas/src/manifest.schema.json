@@ -89,7 +89,7 @@
           "required": ["kind", "width", "height"],
           "properties": {
             "kind": { "const": "image" },
-            "format": { "type": "string", "enum": ["png", "jpg", "jpeg", "webp", "bmp"] }
+            "format": { "type": "string", "enum": ["png", "jpg", "jpeg", "webp", "bmp", "gif"] }
           }
         }
       ]
@@ -102,7 +102,7 @@
           "required": ["kind", "width", "height", "frame_width", "frame_height", "rows", "columns"],
           "properties": {
             "kind": { "const": "sprite_sheet" },
-            "format": { "type": "string", "enum": ["png", "jpg", "jpeg", "webp", "bmp"] },
+            "format": { "type": "string", "enum": ["png", "jpg", "jpeg", "webp", "bmp", "gif"] },
             "frame_width": { "type": "integer", "minimum": 1 },
             "frame_height": { "type": "integer", "minimum": 1 },
             "rows": { "type": "integer", "minimum": 1 },
@@ -121,7 +121,7 @@
           "required": ["kind", "width", "height", "tile_width", "tile_height"],
           "properties": {
             "kind": { "const": "tileset" },
-            "format": { "type": "string", "enum": ["png", "jpg", "jpeg", "webp", "bmp"] },
+            "format": { "type": "string", "enum": ["png", "jpg", "jpeg", "webp", "bmp", "gif"] },
             "tile_width": { "type": "integer", "minimum": 1 },
             "tile_height": { "type": "integer", "minimum": 1 }
           }
@@ -136,7 +136,7 @@
           "required": ["kind", "width", "height"],
           "properties": {
             "kind": { "const": "ui_panel" },
-            "format": { "type": "string", "enum": ["png", "jpg", "jpeg", "webp", "bmp"] },
+            "format": { "type": "string", "enum": ["png", "jpg", "jpeg", "webp", "bmp", "gif"] },
             "frame_style": { "type": "string", "enum": ["simple", "beveled", "inset", "outlined"] },
             "panel_guides": { "type": "boolean", "default": false },
             "export_panel_metadata": { "type": "boolean", "default": false }

@@ -12,7 +12,7 @@ import {
 import { validateBuilderRecipe } from '@placeholderer/core';
 import { colors } from './colors';
 import { renderLayer, exportSVG, preloadRasterImages, rasterCache, type SupportedExportFormat } from './builderRender';
-import { encodeBmp } from '@placeholderer/core';
+import { encodeBmp, encodeGif } from '@placeholderer/core';
 import { PRESETS } from './builderPresets';
 
 const STORAGE_KEY = 'placeholderer:builder';
@@ -381,11 +381,12 @@ export function UIBuilder() {
     }
     // Wait for any imported raster images to finish loading before
     // capturing the export. Without this, an imported image is
-    // silently absent from the resulting PNG/JPG/BMP because drawRaster
-    // kicks off an async image load and the toBlob call races it.
+    // silently absent from the resulting PNG/JPG/BMP/GIF because
+    // drawRaster kicks off an async image load and the toBlob call
+    // races it.
     await preloadRasterImages(state.layers);
-    // PNG / JPEG / BMP: render to an off-screen canvas (the on-screen
-    // canvas is already showing this state).
+    // PNG / JPEG / BMP / GIF: render to an off-screen canvas (the
+    // on-screen canvas is already showing this state).
     const canvas = document.createElement('canvas');
     canvas.width = state.width;
     canvas.height = state.height;
@@ -407,6 +408,16 @@ export function UIBuilder() {
       const ab = new ArrayBuffer(bmpBytes.byteLength);
       new Uint8Array(ab).set(bmpBytes);
       download(new Blob([ab], { type: 'image/bmp' }), 'ui-placeholder.bmp');
+      return;
+    }
+    if (format === 'gif') {
+      // Browsers don't expose image/gif either; encode through our
+      // own GIF89a serializer.
+      const imageData = ctx.getImageData(0, 0, state.width, state.height);
+      const gifBytes = encodeGif(imageData.data, state.width, state.height);
+      const ab = new ArrayBuffer(gifBytes.byteLength);
+      new Uint8Array(ab).set(gifBytes);
+      download(new Blob([ab], { type: 'image/gif' }), 'ui-placeholder.gif');
       return;
     }
     const mime = format === 'jpeg' ? 'image/jpeg' : 'image/png';
@@ -590,6 +601,7 @@ export function UIBuilder() {
           <button onClick={() => exportImage('png')} style={btnAccent(colors)}>Export PNG</button>
           <button onClick={() => exportImage('jpeg')} style={btnAccent(colors)}>Export JPG</button>
           <button onClick={() => exportImage('bmp')} style={btnAccent(colors)}>Export BMP</button>
+          <button onClick={() => exportImage('gif')} style={btnAccent(colors)}>Export GIF</button>
           <button onClick={() => exportImage('svg')} style={btnAccent(colors)}>Export SVG</button>
         </div>
       </div>

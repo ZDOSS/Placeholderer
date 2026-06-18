@@ -105,7 +105,7 @@ describe('validateManifest', () => {
       ...validManifest,
       requests: [{
         ...validManifest.requests[0],
-        assets: [{ ...validManifest.requests[0].assets[0], format: 'gif' }],
+        assets: [{ ...validManifest.requests[0].assets[0], format: 'tiff' }],
       }],
     });
     expect(result.valid).toBe(false);
