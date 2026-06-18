@@ -53,6 +53,8 @@ function formatToMime(format: Format): string {
     case 'jpg':
     case 'jpeg':
       return 'image/jpeg';
+    case 'bmp':
+      return 'image/bmp';
     case 'webp':
       return 'image/webp';
     case 'png':

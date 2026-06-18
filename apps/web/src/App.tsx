@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { validateManifest, generateJob, type CanvasBackend, type Canvas2D, type GenerationReport } from '@placeholderer/core';
+import { validateManifest, generateJob, encodeBmp, type CanvasBackend, type Canvas2D, type GenerationReport } from '@placeholderer/core';
 import type { Manifest, Asset, SafeAdjustment } from '@placeholderer/schemas';
 import { AssetPreview } from './AssetPreview';
 import { UIBuilder } from './UIBuilder';
@@ -19,6 +19,12 @@ const webCanvasBackend: CanvasBackend = {
     return {
       ctx: ctx as unknown as Canvas2D,
       encode: async (mime) => {
+        // BMP isn't supported by OffscreenCanvas.convertToBlob, so
+        // we read the RGBA pixel data and run our own encoder.
+        if (mime === 'image/bmp') {
+          const data = ctx.getImageData(0, 0, width, height);
+          return encodeBmp(data.data, width, height);
+        }
         const blob = await canvas.convertToBlob({ type: mime });
         return new Uint8Array(await blob.arrayBuffer());
       },

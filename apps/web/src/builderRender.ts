@@ -374,7 +374,7 @@ function drawFilledShape(ctx: CanvasRenderingContext2D, layer: any, x: number, y
   }
 }
 
-export type SupportedExportFormat = 'png' | 'jpeg' | 'svg';
+export type SupportedExportFormat = 'png' | 'jpeg' | 'bmp' | 'svg';
 
 /**
  * Serialize the layer stack to an SVG document. Used by the

@@ -4,7 +4,7 @@
 
 export type AssetKind = 'image' | 'sprite_sheet' | 'tileset' | 'ui_panel' | 'audio';
 
-export type Format = 'png' | 'jpg' | 'jpeg' | 'webp' | 'wav';
+export type Format = 'png' | 'jpg' | 'jpeg' | 'webp' | 'bmp' | 'wav';
 
 export type NumberingStyle = 'zero-padded' | 'plain' | 'none';
 
