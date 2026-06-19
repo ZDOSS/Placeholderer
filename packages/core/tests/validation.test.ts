@@ -172,6 +172,80 @@ describe('validateManifest', () => {
     });
     expect(result.valid).toBe(false);
   });
+
+  it('accepts builder_recipe on image, tileset, and ui_panel assets', () => {
+    // The schema should permit builder_recipe on every image-style
+    // asset kind that generateJob can actually render through the
+    // recipe layer stack.
+    const recipe = {
+      canvasMode: 'compact',
+      layers: [
+        { id: '1', type: 'rect', name: 'bg', visible: true, locked: false },
+      ],
+    };
+    for (const kind of ['image', 'tileset', 'ui_panel'] as const) {
+      const result = validateManifest({
+        schemaVersion: 1,
+        requests: [{
+          assets: [{
+            kind,
+            name: `${kind}_with_recipe`,
+            format: 'png',
+            output_path: 'art',
+            width: 32,
+            height: 32,
+            builder_recipe: recipe,
+            ...(kind === 'tileset' ? { tile_width: 16, tile_height: 16 } : {}),
+          }],
+        }],
+      });
+      if (!result.valid) {
+        // eslint-disable-next-line no-console
+        console.error(`${kind} + builder_recipe validation errors:`, result.errors);
+      }
+      expect(result.valid).toBe(true);
+    }
+  });
+
+  it('rejects builder_recipe on sprite_sheet assets', () => {
+    // Regression for Greptile round 13: the schema previously
+    // listed builder_recipe as a valid optional property of
+    // spriteSheetAsset, but generateJob unconditionally rejects
+    // this combination (the recipe renders one still image while
+    // the animation sidecar would still claim rows × columns
+    // frames, producing mismatched artifacts). The schema should
+    // reject the combination at validation time so callers get
+    // a clear schema error instead of a runtime asset error.
+    const result = validateManifest({
+      schemaVersion: 1,
+      requests: [{
+        assets: [{
+          kind: 'sprite_sheet',
+          name: 'sprites',
+          format: 'png',
+          output_path: 'art',
+          width: 64,
+          height: 64,
+          frame_width: 16,
+          frame_height: 16,
+          rows: 2,
+          columns: 2,
+          builder_recipe: {
+            canvasMode: 'compact',
+            layers: [
+              { id: '1', type: 'rect', name: 'bg', visible: true, locked: false },
+            ],
+          },
+        }],
+      }],
+    });
+    expect(result.valid).toBe(false);
+    // The error must mention builder_recipe as an unknown property.
+    const messages = result.errors
+      .map((e) => `${e.path}: ${e.message} ${JSON.stringify(e.params ?? {})}`)
+      .join('\n');
+    expect(messages).toMatch(/builder_recipe/);
+  });
 });
 
 describe('validateBuilderRecipe', () => {

@@ -148,7 +148,7 @@ export async function generateJob(
           // mismatched artifacts.
           if (asset.kind === 'sprite_sheet') {
             throw new Error(
-              `${asset.name}: sprite_sheet assets cannot carry a builder_recipe (the sidecar would mismatch the single rendered frame)`,
+              'sprite_sheet assets cannot carry a builder_recipe (the sidecar would mismatch the single rendered frame)',
             );
           }
           // When the asset carries a UI Builder recipe, render the

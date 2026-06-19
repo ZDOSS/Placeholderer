@@ -58,7 +58,7 @@
     "baseAsset": {
       "type": "object",
       "required": ["kind", "name", "format", "output_path"],
-      "description": "Common fields for every asset kind. Image-style assets also require width/height; audio does not.",
+      "description": "Common fields for every asset kind. Image-style assets also require width/height; audio does not. Concrete asset schemas repeat these properties so additionalProperties:false can reject unknown fields per-kind.",
       "properties": {
         "kind": { "type": "string" },
         "name": { "type": "string" },
@@ -82,88 +82,135 @@
       }
     },
     "imageAsset": {
-      "allOf": [
-        { "$ref": "#/definitions/baseAsset" },
-        {
-          "type": "object",
-          "required": ["kind", "width", "height"],
-          "properties": {
-            "kind": { "const": "image" },
-            "format": { "type": "string", "enum": ["png", "jpg", "jpeg", "webp", "bmp", "gif"] },
-            "builder_recipe": { "$ref": "https://placeholderer.dev/schemas/builder-recipe/v1" }
-          }
-        }
-      ]
+      "type": "object",
+      "required": ["kind", "name", "width", "height", "format", "output_path"],
+      "properties": {
+        "kind": { "const": "image" },
+        "name": { "type": "string" },
+        "width": { "type": "integer", "minimum": 1 },
+        "height": { "type": "integer", "minimum": 1 },
+        "format": { "type": "string", "enum": ["png", "jpg", "jpeg", "webp", "bmp", "gif"] },
+        "output_path": {
+          "type": "string",
+          "pattern": "^(?!/|.*\\.\\.)[a-zA-Z0-9_\\-./]*$",
+          "description": "Output directory inside the ZIP. Letters, digits, underscore, hyphen, dot, and forward slash only. Must not start with '/' and must not contain '..'."
+        },
+        "label_enabled": { "type": "boolean" },
+        "numbering_style": { "type": "string", "enum": ["zero-padded", "plain", "none"] },
+        "background_color": { "type": "string" },
+        "fill_mode": { "type": "string", "enum": ["repeat", "stretch"] },
+        "label_position": { "type": "string", "enum": ["corners", "center", "top-center", "bottom-center"] },
+        "custom_fill_image": { "type": "string" },
+        "builder_recipe": { "$ref": "https://placeholderer.dev/schemas/builder-recipe/v1" }
+      },
+      "additionalProperties": false
     },
     "spriteSheetAsset": {
-      "allOf": [
-        { "$ref": "#/definitions/baseAsset" },
-        {
-          "type": "object",
-          "required": ["kind", "width", "height", "frame_width", "frame_height", "rows", "columns"],
-          "properties": {
-            "kind": { "const": "sprite_sheet" },
-            "format": { "type": "string", "enum": ["png", "jpg", "jpeg", "webp", "bmp", "gif"] },
-            "frame_width": { "type": "integer", "minimum": 1 },
-            "frame_height": { "type": "integer", "minimum": 1 },
-            "rows": { "type": "integer", "minimum": 1 },
-            "columns": { "type": "integer", "minimum": 1 },
-            "show_grid": { "type": "boolean", "default": true },
-            "frame_duration_ms": { "type": "number", "minimum": 1, "maximum": 10000, "description": "Per-frame duration in ms; when set, the generator emits an animation.json sidecar" },
-            "builder_recipe": { "$ref": "https://placeholderer.dev/schemas/builder-recipe/v1" }
-          }
-        }
-      ]
+      "type": "object",
+      "required": ["kind", "name", "width", "height", "format", "output_path", "frame_width", "frame_height", "rows", "columns"],
+      "properties": {
+        "kind": { "const": "sprite_sheet" },
+        "name": { "type": "string" },
+        "width": { "type": "integer", "minimum": 1 },
+        "height": { "type": "integer", "minimum": 1 },
+        "format": { "type": "string", "enum": ["png", "jpg", "jpeg", "webp", "bmp", "gif"] },
+        "output_path": {
+          "type": "string",
+          "pattern": "^(?!/|.*\\.\\.)[a-zA-Z0-9_\\-./]*$",
+          "description": "Output directory inside the ZIP. Letters, digits, underscore, hyphen, dot, and forward slash only. Must not start with '/' and must not contain '..'."
+        },
+        "label_enabled": { "type": "boolean" },
+        "numbering_style": { "type": "string", "enum": ["zero-padded", "plain", "none"] },
+        "background_color": { "type": "string" },
+        "fill_mode": { "type": "string", "enum": ["repeat", "stretch"] },
+        "label_position": { "type": "string", "enum": ["corners", "center", "top-center", "bottom-center"] },
+        "custom_fill_image": { "type": "string" },
+        "frame_width": { "type": "integer", "minimum": 1 },
+        "frame_height": { "type": "integer", "minimum": 1 },
+        "rows": { "type": "integer", "minimum": 1 },
+        "columns": { "type": "integer", "minimum": 1 },
+        "show_grid": { "type": "boolean", "default": true },
+        "frame_duration_ms": { "type": "number", "minimum": 1, "maximum": 10000, "description": "Per-frame duration in ms; when set, the generator emits an animation.json sidecar" }
+      },
+      "additionalProperties": false
     },
     "tilesetAsset": {
-      "allOf": [
-        { "$ref": "#/definitions/baseAsset" },
-        {
-          "type": "object",
-          "required": ["kind", "width", "height", "tile_width", "tile_height"],
-          "properties": {
-            "kind": { "const": "tileset" },
-            "format": { "type": "string", "enum": ["png", "jpg", "jpeg", "webp", "bmp", "gif"] },
-            "tile_width": { "type": "integer", "minimum": 1 },
-            "tile_height": { "type": "integer", "minimum": 1 },
-            "builder_recipe": { "$ref": "https://placeholderer.dev/schemas/builder-recipe/v1" }
-          }
-        }
-      ]
+      "type": "object",
+      "required": ["kind", "name", "width", "height", "format", "output_path", "tile_width", "tile_height"],
+      "properties": {
+        "kind": { "const": "tileset" },
+        "name": { "type": "string" },
+        "width": { "type": "integer", "minimum": 1 },
+        "height": { "type": "integer", "minimum": 1 },
+        "format": { "type": "string", "enum": ["png", "jpg", "jpeg", "webp", "bmp", "gif"] },
+        "output_path": {
+          "type": "string",
+          "pattern": "^(?!/|.*\\.\\.)[a-zA-Z0-9_\\-./]*$",
+          "description": "Output directory inside the ZIP. Letters, digits, underscore, hyphen, dot, and forward slash only. Must not start with '/' and must not contain '..'."
+        },
+        "label_enabled": { "type": "boolean" },
+        "numbering_style": { "type": "string", "enum": ["zero-padded", "plain", "none"] },
+        "background_color": { "type": "string" },
+        "fill_mode": { "type": "string", "enum": ["repeat", "stretch"] },
+        "label_position": { "type": "string", "enum": ["corners", "center", "top-center", "bottom-center"] },
+        "custom_fill_image": { "type": "string" },
+        "tile_width": { "type": "integer", "minimum": 1 },
+        "tile_height": { "type": "integer", "minimum": 1 },
+        "builder_recipe": { "$ref": "https://placeholderer.dev/schemas/builder-recipe/v1" }
+      },
+      "additionalProperties": false
     },
     "uiPanelAsset": {
-      "allOf": [
-        { "$ref": "#/definitions/baseAsset" },
-        {
-          "type": "object",
-          "required": ["kind", "width", "height"],
-          "properties": {
-            "kind": { "const": "ui_panel" },
-            "format": { "type": "string", "enum": ["png", "jpg", "jpeg", "webp", "bmp", "gif"] },
-            "frame_style": { "type": "string", "enum": ["simple", "beveled", "inset", "outlined"] },
-            "panel_guides": { "type": "boolean", "default": false },
-            "export_panel_metadata": { "type": "boolean", "default": false },
-            "builder_recipe": { "$ref": "https://placeholderer.dev/schemas/builder-recipe/v1" }
-          }
-        }
-      ]
+      "type": "object",
+      "required": ["kind", "name", "width", "height", "format", "output_path"],
+      "properties": {
+        "kind": { "const": "ui_panel" },
+        "name": { "type": "string" },
+        "width": { "type": "integer", "minimum": 1 },
+        "height": { "type": "integer", "minimum": 1 },
+        "format": { "type": "string", "enum": ["png", "jpg", "jpeg", "webp", "bmp", "gif"] },
+        "output_path": {
+          "type": "string",
+          "pattern": "^(?!/|.*\\.\\.)[a-zA-Z0-9_\\-./]*$",
+          "description": "Output directory inside the ZIP. Letters, digits, underscore, hyphen, dot, and forward slash only. Must not start with '/' and must not contain '..'."
+        },
+        "label_enabled": { "type": "boolean" },
+        "numbering_style": { "type": "string", "enum": ["zero-padded", "plain", "none"] },
+        "background_color": { "type": "string" },
+        "fill_mode": { "type": "string", "enum": ["repeat", "stretch"] },
+        "label_position": { "type": "string", "enum": ["corners", "center", "top-center", "bottom-center"] },
+        "custom_fill_image": { "type": "string" },
+        "frame_style": { "type": "string", "enum": ["simple", "beveled", "inset", "outlined"] },
+        "panel_guides": { "type": "boolean", "default": false },
+        "export_panel_metadata": { "type": "boolean", "default": false },
+        "builder_recipe": { "$ref": "https://placeholderer.dev/schemas/builder-recipe/v1" }
+      },
+      "additionalProperties": false
     },
     "audioAsset": {
-      "allOf": [
-        { "$ref": "#/definitions/baseAsset" },
-        {
-          "type": "object",
-          "required": ["kind", "frequency", "duration"],
-          "properties": {
-            "kind": { "const": "audio" },
-            "format": { "type": "string", "enum": ["wav"] },
-            "frequency": { "type": "number", "minimum": 1, "maximum": 22050, "description": "Tone frequency in Hz" },
-            "duration": { "type": "number", "minimum": 0.01, "maximum": 60, "description": "Duration in seconds" },
-            "sample_rate": { "type": "integer", "minimum": 8000, "maximum": 96000, "default": 44100 },
-            "amplitude": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.5 }
-          }
-        }
-      ]
+      "type": "object",
+      "required": ["kind", "name", "format", "output_path", "frequency", "duration"],
+      "properties": {
+        "kind": { "const": "audio" },
+        "name": { "type": "string" },
+        "format": { "type": "string", "enum": ["wav"] },
+        "output_path": {
+          "type": "string",
+          "pattern": "^(?!/|.*\\.\\.)[a-zA-Z0-9_\\-./]*$",
+          "description": "Output directory inside the ZIP. Letters, digits, underscore, hyphen, dot, and forward slash only. Must not start with '/' and must not contain '..'."
+        },
+        "label_enabled": { "type": "boolean" },
+        "numbering_style": { "type": "string", "enum": ["zero-padded", "plain", "none"] },
+        "background_color": { "type": "string" },
+        "fill_mode": { "type": "string", "enum": ["repeat", "stretch"] },
+        "label_position": { "type": "string", "enum": ["corners", "center", "top-center", "bottom-center"] },
+        "custom_fill_image": { "type": "string" },
+        "frequency": { "type": "number", "minimum": 1, "maximum": 22050, "description": "Tone frequency in Hz" },
+        "duration": { "type": "number", "minimum": 0.01, "maximum": 60, "description": "Duration in seconds" },
+        "sample_rate": { "type": "integer", "minimum": 8000, "maximum": 96000, "default": 44100 },
+        "amplitude": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.5 }
+      },
+      "additionalProperties": false
     }
   }
 }
