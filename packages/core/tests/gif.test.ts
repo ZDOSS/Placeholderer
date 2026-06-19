@@ -130,4 +130,142 @@ describe('encodeGif', () => {
     const transparent = new Uint8ClampedArray([128, 64, 32, 0]);
     expect(encodeGif(opaque, 1, 1).length).toBeLessThan(encodeGif(transparent, 1, 1).length);
   });
+
+  it('produces an LZW stream that a standards-based decoder can read across code-size boundaries', () => {
+    // Regression for Greptile round 12: the previous encoder
+    // bumped codeSize at nextCode === (1 << codeSize) (e.g. 512
+    // for codeSize=9), but the GIF LZW reference decoder bumps
+    // one iteration later at nextCode === (1 << codeSize) + 1
+    // (e.g. 513) to compensate for the encoder's one-add lead
+    // (the encoder adds on the first data code, the decoder
+    // waits for the second). The off-by-one meant the encoder
+    // started writing 10-bit codes one iteration before the
+    // decoder started reading them, desyncing the bit stream at
+    // the first LZW boundary. Moderately varied image content
+    // (gradients, antialiasing, varied rasterized pixels) would
+    // produce unreadable GIFs.
+    //
+    // The decoder below mirrors the standard libgif/SuperGif
+    // reference: it reads a code, decodes the entry, then on
+    // the next iteration adds table[oldCode] + first(entry) to
+    // the table, increments nextCode, and bumps codeSize when
+    // nextCode exceeds the current code mask. That bump rule
+    // (nextCode > 2^codeSize - 1) is one off from the
+    // `code_size = ceil(log2(next_code))` rule in the GIF89a
+    // reference, but it is the rule real-world decoders use
+    // because it cancels the encoder's first-iteration add.
+    function decodeGif(bytes: Uint8Array): number[] {
+      const packed = bytes[10];
+      const gctSize = (packed & 0x80) ? 3 * (1 << ((packed & 0x07) + 1)) : 0;
+      let pos = 13 + gctSize;
+      // Skip extensions until the Image Descriptor.
+      while (pos < bytes.length && bytes[pos] !== 0x2c) {
+        if (bytes[pos] === 0x21) {
+          pos++;
+          pos++;
+          while (pos < bytes.length) {
+            const size = bytes[pos++];
+            if (size === 0) break;
+            pos += size;
+          }
+        } else {
+          break;
+        }
+      }
+      pos += 10; // Image Descriptor (separator + left + top + w + h + packed)
+      const minCodeSize = bytes[pos++];
+      // Collect LZW sub-blocks into a flat byte array.
+      const data: number[] = [];
+      while (pos < bytes.length) {
+        const size = bytes[pos++];
+        if (size === 0) break;
+        for (let i = 0; i < size; i++) data.push(bytes[pos++]);
+      }
+      const clearCode = 1 << minCodeSize;
+      const endCode = clearCode + 1;
+      const initCodeSize = minCodeSize + 1;
+      let codeSize = initCodeSize;
+      let nextCode = endCode + 1;
+      const codeMask = (cs: number): number => (1 << cs) - 1;
+      const table = new Map<number, number[]>();
+      for (let i = 0; i < clearCode; i++) table.set(i, [i]);
+      let bitBuffer = 0;
+      let bitCount = 0;
+      let dataIdx = 0;
+      const readBits = (n: number): number => {
+        while (bitCount < n) {
+          if (dataIdx >= data.length) return -1;
+          bitBuffer |= data[dataIdx++] << bitCount;
+          bitCount += 8;
+        }
+        const v = bitBuffer & codeMask(n);
+        bitBuffer >>>= n;
+        bitCount -= n;
+        return v;
+      };
+      const out: number[] = [];
+      let oldCode: number | null = null;
+      let safety = 0;
+      while (safety++ < 1_000_000) {
+        const k = readBits(codeSize);
+        if (k === -1 || k === endCode) break;
+        if (k === clearCode) {
+          table.clear();
+          for (let i = 0; i < clearCode; i++) table.set(i, [i]);
+          codeSize = initCodeSize;
+          nextCode = endCode + 1;
+          oldCode = null;
+          continue;
+        }
+        let entry: number[];
+        if (table.has(k)) {
+          entry = table.get(k)!;
+        } else if (k === nextCode && oldCode !== null) {
+          const pe = table.get(oldCode)!;
+          entry = [...pe, pe[0]];
+        } else {
+          throw new Error(`bad code ${k} at nextCode=${nextCode}, codeSize=${codeSize}`);
+        }
+        out.push(...entry);
+        if (oldCode !== null) {
+          const pe = table.get(oldCode)!;
+          table.set(nextCode, [...pe, entry[0]]);
+          nextCode++;
+          if (nextCode > codeMask(codeSize) && codeSize < 12) {
+            codeSize++;
+          }
+        }
+        oldCode = k;
+      }
+      return out;
+    }
+
+    function rgbToIndex(r: number, g: number, b: number): number {
+      const rq = r === 0 ? 0 : Math.round(r / 51);
+      const gq = g === 0 ? 0 : Math.round(g / 51);
+      const bq = b === 0 ? 0 : Math.round(b / 51);
+      return rq * 36 + gq * 6 + bq;
+    }
+
+    // 600 varied pixels — crosses the 256-entry table boundary and
+    // exercises the 9→10 code-size transition, plus a second
+    // gradient sweep that crosses the 10→11 transition.
+    const w = 600;
+    const h = 1;
+    const rgba = new Uint8ClampedArray(w * h * 4);
+    for (let i = 0; i < w; i++) {
+      rgba[i * 4] = (i * 17) % 256;
+      rgba[i * 4 + 1] = (i * 31) % 256;
+      rgba[i * 4 + 2] = (i * 47) % 256;
+      rgba[i * 4 + 3] = 255;
+    }
+    const bytes = encodeGif(rgba, w, h);
+    const decoded = decodeGif(bytes);
+
+    const expected: number[] = [];
+    for (let i = 0; i < w; i++) {
+      expected.push(rgbToIndex(rgba[i * 4], rgba[i * 4 + 1], rgba[i * 4 + 2]));
+    }
+    expect(decoded).toEqual(expected);
+  });
 });

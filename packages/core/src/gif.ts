@@ -110,15 +110,29 @@ export function encodeGif(rgba: Uint8ClampedArray | Uint8Array, width: number, h
   palette[transparentIndex * 3 + 2] = 0;
 
   // ---- LZW compression ----
+  // GIF LZW code-size timing follows the GIF89a spec (Appendix F):
+  // code_size = ceil(log2(next_code)). With minCodeSize=8 the table
+  // starts at 258 entries (0..255 palette + CLEAR(256) + END(257))
+  // and uses 9 bits. The encoder bumps to 10 bits when next_code
+  // would no longer fit in 9 bits, i.e. when next_code reaches
+  // 2^9 + 1 = 513. The decoder uses the same rule, so the
+  // threshold is (1 << codeSize) + 1 — NOT 1 << codeSize. Using
+  // 1 << codeSize bumps the encoder one iteration early, which
+  // desyncs the bit stream at the 512-code boundary: the encoder
+  // starts writing 10-bit codes while the decoder is still
+  // reading 9-bit codes, and a moderately varied image (e.g. a
+  // 600-pixel row crossing the first LZW boundary) fails to
+  // decode (Greptile round 12).
   const minCodeSize = 8; // palette size 256 → min code size 8
   const clearCode = 1 << minCodeSize; // 256
   const endCode = clearCode + 1; // 257
   // First data code = endCode + 1.
-  let codeSize = minCodeSize + 1;
-  let nextCode = endCode + 1;
-  // Threshold at which we bump codeSize: when nextCode reaches
-  // 2^codeSize, the next emit needs an extra bit.
-  let nextBumpThreshold = 1 << codeSize;
+  let codeSize = minCodeSize + 1; // 9
+  let nextCode = endCode + 1; // 258
+  // Bump codeSize when nextCode reaches (1 << codeSize) + 1,
+  // matching the GIF89a reference decoder's code_size =
+  // ceil(log2(next_code)) rule.
+  let nextBumpThreshold = (1 << codeSize) + 1; // 513
 
   // Bit-stream writer.
   const dataBytes: number[] = [];
@@ -153,10 +167,11 @@ export function encodeGif(rgba: Uint8ClampedArray | Uint8Array, width: number, h
       writeBits(prefix, codeSize);
       dict.set(dictKey(prefix, k), nextCode);
       nextCode++;
-      // Bump codeSize at the threshold (standard GIF behavior).
+      // Bump codeSize at the threshold (GIF89a Appendix F:
+      // code_size = ceil(log2(next_code))).
       if (nextCode === nextBumpThreshold && codeSize < 12) {
         codeSize++;
-        nextBumpThreshold = 1 << codeSize;
+        nextBumpThreshold = (1 << codeSize) + 1;
       }
       // Reset dictionary when full (4096 entries).
       if (nextCode === 4096) {
@@ -164,7 +179,7 @@ export function encodeGif(rgba: Uint8ClampedArray | Uint8Array, width: number, h
         dict.clear();
         codeSize = minCodeSize + 1;
         nextCode = endCode + 1;
-        nextBumpThreshold = 1 << codeSize;
+        nextBumpThreshold = (1 << codeSize) + 1;
       }
       prefix = k;
     }
