@@ -12,6 +12,7 @@ import {
 import { validateBuilderRecipe } from '@placeholderer/core';
 import { colors } from './colors';
 import { renderLayer, exportSVG, preloadRasterImages, rasterCache, type SupportedExportFormat } from './builderRender';
+import { encodeBmp, encodeGif } from '@placeholderer/core';
 import { PRESETS } from './builderPresets';
 
 const STORAGE_KEY = 'placeholderer:builder';
@@ -151,6 +152,11 @@ export function UIBuilder() {
   const [future, setFuture] = useState<BuilderState[]>([]);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [editingRecipe, setEditingRecipe] = useState(false);
+  // Presets are hidden behind a button by design — clicking a
+  // preset appends its layers and resizes the canvas, which can
+  // trample in-progress work. Users opt in by clicking the
+  // Presets button next to Clear.
+  const [presetsOpen, setPresetsOpen] = useState(false);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -158,6 +164,21 @@ export function UIBuilder() {
 
   // Persist on every state change
   useEffect(() => { saveToStorage(state); }, [state]);
+
+  // Close the presets popover when clicking anywhere outside it
+  // (including the trigger button — otherwise mousedown on the
+  // button closes it before the click handler reopens it).
+  // Cheap global listener; only does work while the popover is open.
+  useEffect(() => {
+    if (!presetsOpen) return;
+    const handler = (e: MouseEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target && (target.closest('[data-presets-popover]') || target.closest('[data-presets-trigger]'))) return;
+      setPresetsOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [presetsOpen]);
 
   // Tick that increments each time an image fill (or raster layer)
   // finishes loading. The render effect below depends on this so the
@@ -362,11 +383,12 @@ export function UIBuilder() {
     }
     // Wait for any imported raster images to finish loading before
     // capturing the export. Without this, an imported image is
-    // silently absent from the resulting PNG/JPG because drawRaster
-    // kicks off an async image load and the toBlob call races it.
+    // silently absent from the resulting PNG/JPG/BMP/GIF because
+    // drawRaster kicks off an async image load and the toBlob call
+    // races it.
     await preloadRasterImages(state.layers);
-    // PNG / JPEG: render to an off-screen canvas (the on-screen canvas
-    // is already showing this state).
+    // PNG / JPEG / BMP / GIF: render to an off-screen canvas (the
+    // on-screen canvas is already showing this state).
     const canvas = document.createElement('canvas');
     canvas.width = state.width;
     canvas.height = state.height;
@@ -378,6 +400,28 @@ export function UIBuilder() {
       ctx.fillRect(0, 0, state.width, state.height);
     }
     state.layers.forEach((layer) => renderLayer({ ctx, width: state.width, height: state.height }, layer));
+    if (format === 'bmp') {
+      // Browsers don't expose image/bmp; encode the RGBA buffer
+      // ourselves via @placeholderer/core's encodeBmp.
+      const imageData = ctx.getImageData(0, 0, state.width, state.height);
+      const bmpBytes = encodeBmp(imageData.data, state.width, state.height);
+      // Allocate a real ArrayBuffer + copy so the Blob constructor
+      // (strict about ArrayBuffer vs SharedArrayBuffer) accepts it.
+      const ab = new ArrayBuffer(bmpBytes.byteLength);
+      new Uint8Array(ab).set(bmpBytes);
+      download(new Blob([ab], { type: 'image/bmp' }), 'ui-placeholder.bmp');
+      return;
+    }
+    if (format === 'gif') {
+      // Browsers don't expose image/gif either; encode through our
+      // own GIF89a serializer.
+      const imageData = ctx.getImageData(0, 0, state.width, state.height);
+      const gifBytes = encodeGif(imageData.data, state.width, state.height);
+      const ab = new ArrayBuffer(gifBytes.byteLength);
+      new Uint8Array(ab).set(gifBytes);
+      download(new Blob([ab], { type: 'image/gif' }), 'ui-placeholder.gif');
+      return;
+    }
     const mime = format === 'jpeg' ? 'image/jpeg' : 'image/png';
     const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, mime));
     if (blob) download(blob, `ui-placeholder.${format === 'jpeg' ? 'jpg' : 'png'}`);
@@ -528,12 +572,14 @@ export function UIBuilder() {
   const selectedLayer = state.layers.find((l) => l.id === selectedId) ?? null;
 
   // Engine-aware presets grouped by engine for the preset picker.
+  // The factory closes the popover and refuses to apply when the
+  // user has unsaved layers — they have to Clear first if they
+  // want a clean slate, otherwise the preset appends.
   const presets = PRESETS.map((p) => ({
     name: p.name,
     engine: p.engine,
     factory: () => {
-      // Apply the preset: replace the canvas size and append the
-      // preset's layers to the current stack.
+      setPresetsOpen(false);
       const layers: Layer[] = p.layers.map((l) => ({ ...l, id: makeId() }));
       pushHistory({
         ...state,
@@ -556,11 +602,13 @@ export function UIBuilder() {
           <button onClick={exportRecipe} style={btnSecondary(colors)}>Export Recipe</button>
           <button onClick={() => exportImage('png')} style={btnAccent(colors)}>Export PNG</button>
           <button onClick={() => exportImage('jpeg')} style={btnAccent(colors)}>Export JPG</button>
+          <button onClick={() => exportImage('bmp')} style={btnAccent(colors)}>Export BMP</button>
+          <button onClick={() => exportImage('gif')} style={btnAccent(colors)}>Export GIF</button>
           <button onClick={() => exportImage('svg')} style={btnAccent(colors)}>Export SVG</button>
         </div>
       </div>
 
-      <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', marginBottom: '1rem', padding: '0.75rem', background: colors.bgElevated, border: `1px solid ${colors.border}`, borderRadius: '6px', flexWrap: 'wrap' }}>
+      <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', marginBottom: '1rem', padding: '0.75rem', background: colors.bgElevated, border: `1px solid ${colors.border}`, borderRadius: '6px', flexWrap: 'wrap', position: 'relative' }}>
         <span style={{ fontSize: '0.9rem', color: colors.textMuted }}>Canvas:</span>
         <input type="number" value={state.width} onChange={(e) => setState((s) => ({ ...s, width: Math.max(50, parseInt(e.target.value) || 50) }))} style={numInputStyle(colors)} />
         <span>×</span>
@@ -572,6 +620,63 @@ export function UIBuilder() {
           Snap
         </label>
         <button onClick={clearRecipe} style={{ ...btnSecondary(colors), marginLeft: 'auto' }}>Clear</button>
+        <button data-presets-trigger onClick={() => setPresetsOpen((o) => !o)} style={btnSecondary(colors)} aria-expanded={presetsOpen} aria-haspopup="dialog">
+          Presets
+        </button>
+        {presetsOpen && (
+          <div
+            role="dialog"
+            aria-label="Engine-aware presets"
+            data-presets-popover
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              position: 'absolute',
+              top: 'calc(100% + 0.25rem)',
+              right: 0,
+              width: 320,
+              maxHeight: '70vh',
+              overflowY: 'auto',
+              background: colors.bgElevated,
+              border: `1px solid ${colors.border}`,
+              borderRadius: '8px',
+              padding: '0.75rem',
+              boxShadow: '0 10px 25px -5px rgb(0 0 0 / 0.3)',
+              zIndex: 50,
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+              <strong style={{ fontSize: '0.85rem' }}>Pick a preset</strong>
+              <button
+                onClick={() => setPresetsOpen(false)}
+                style={{ background: 'none', border: 'none', color: colors.textMuted, cursor: 'pointer', fontSize: '1.1rem', padding: 0, lineHeight: 1 }}
+                aria-label="Close presets"
+              >
+                ×
+              </button>
+            </div>
+            <div style={{ fontSize: '0.75rem', color: colors.textMuted, marginBottom: '0.75rem' }}>
+              Appending layers and resizing the canvas. Use Clear first to start over.
+            </div>
+            {(['Godot', 'Unity', 'Unreal', 'Common'] as const).map((engine) => {
+              const enginePresets = presets.filter((p) => p.engine === engine);
+              if (enginePresets.length === 0) return null;
+              return (
+                <div key={engine} style={{ marginBottom: '0.5rem' }}>
+                  <div style={{ fontSize: '0.7rem', color: colors.textDim, marginBottom: '0.25rem' }}>{engine}</div>
+                  {enginePresets.map((p) => (
+                    <button
+                      key={p.name}
+                      onClick={p.factory}
+                      style={{ ...btnSecondary(colors), marginRight: '0.25rem', marginBottom: '0.25rem', fontSize: '0.8rem' }}
+                    >
+                      {p.name}
+                    </button>
+                  ))}
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       <div style={{ display: 'flex', gap: '2rem', height: 'calc(100% - 130px)' }}>
@@ -612,28 +717,7 @@ export function UIBuilder() {
             <button onClick={importRaster} style={btnSecondary(colors)}>Import Image</button>
           </div>
 
-          {/* Presets, grouped by engine */}
-          <div style={{ marginBottom: '1rem' }}>
-            <div style={{ fontSize: '0.8rem', color: colors.textDim, marginBottom: '0.35rem' }}>Presets</div>
-            {(['Godot', 'Unity', 'Unreal', 'Common'] as const).map((engine) => {
-              const enginePresets = presets.filter((p) => p.engine === engine);
-              if (enginePresets.length === 0) return null;
-              return (
-                <div key={engine} style={{ marginBottom: '0.4rem' }}>
-                  <div style={{ fontSize: '0.7rem', color: colors.textDim, marginBottom: '0.2rem' }}>{engine}</div>
-                  {enginePresets.map((p) => (
-                    <button
-                      key={p.name}
-                      onClick={p.factory}
-                      style={{ ...btnSecondary(colors), marginRight: '0.25rem', marginBottom: '0.25rem', fontSize: '0.8rem' }}
-                    >
-                      {p.name}
-                    </button>
-                  ))}
-                </div>
-              );
-            })}
-          </div>
+          {/* Presets are exposed via the Presets button next to Clear. */}
 
           {/* Layers */}
           <div style={{ marginBottom: '1rem' }}>

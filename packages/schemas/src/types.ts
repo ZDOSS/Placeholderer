@@ -4,7 +4,7 @@
 
 export type AssetKind = 'image' | 'sprite_sheet' | 'tileset' | 'ui_panel' | 'audio';
 
-export type Format = 'png' | 'jpg' | 'jpeg' | 'webp' | 'wav';
+export type Format = 'png' | 'jpg' | 'jpeg' | 'webp' | 'bmp' | 'gif' | 'wav';
 
 export type NumberingStyle = 'zero-padded' | 'plain' | 'none';
 
@@ -70,6 +70,10 @@ export interface DimensionalAsset extends BaseAsset {
 
 export interface ImageAsset extends DimensionalAsset {
   kind: 'image';
+  /** Optional UI Builder recipe. When present, generateJob renders
+   *  the asset by feeding the recipe through the canvas renderer
+   *  instead of the standard placeholder grid. */
+  builder_recipe?: BuilderRecipe;
 }
 
 export interface SpriteSheetAsset extends DimensionalAsset {
@@ -82,12 +86,18 @@ export interface SpriteSheetAsset extends DimensionalAsset {
   /** Per-frame duration in milliseconds. When set, the generator
    *  writes an animation.json sidecar with the timing data. */
   frame_duration_ms?: number;
+  // Note: sprite_sheet intentionally does NOT accept builder_recipe.
+  // A recipe renders a single still image but the animation sidecar
+  // would still claim rows × columns frames, producing a mismatched
+  // artifact set. generateJob rejects this combination.
 }
 
 export interface TilesetAsset extends DimensionalAsset {
   kind: 'tileset';
   tile_width: number;
   tile_height: number;
+  /** Optional UI Builder recipe. */
+  builder_recipe?: BuilderRecipe;
 }
 
 export interface UiPanelAsset extends DimensionalAsset {
@@ -95,6 +105,8 @@ export interface UiPanelAsset extends DimensionalAsset {
   frame_style?: FrameStyle;
   panel_guides?: boolean;
   export_panel_metadata?: boolean;
+  /** Optional UI Builder recipe. */
+  builder_recipe?: BuilderRecipe;
 }
 
 export interface AudioAsset extends BaseAsset {

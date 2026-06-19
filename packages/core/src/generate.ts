@@ -20,6 +20,7 @@ import {
 import type { CanvasBackend } from './canvas.js';
 import { buildReport, type GenerationReport } from './report.js';
 import { generateAudio } from './audio.js';
+import { renderBuilderRecipe } from './builderRender.js';
 
 export interface GenerateResult {
   success: boolean;
@@ -53,6 +54,10 @@ function formatToMime(format: Format): string {
     case 'jpg':
     case 'jpeg':
       return 'image/jpeg';
+    case 'bmp':
+      return 'image/bmp';
+    case 'gif':
+      return 'image/gif';
     case 'webp':
       return 'image/webp';
     case 'png':
@@ -133,6 +138,33 @@ export async function generateJob(
         let bytes: Uint8Array;
         if (asset.kind === 'audio') {
           bytes = generateAudio(asset as AudioAsset);
+        } else if ((asset as any).builder_recipe) {
+          // A sprite_sheet with a builder_recipe and a frame_duration_ms
+          // would render as one still image but the sidecar pass
+          // would still emit animation.json claiming rows × columns
+          // frames. Consumers that slice on the sidecar would read
+          // the wrong image. Reject this combination up front so the
+          // manifest report surfaces the failure instead of shipping
+          // mismatched artifacts.
+          if (asset.kind === 'sprite_sheet') {
+            throw new Error(
+              'sprite_sheet assets cannot carry a builder_recipe (the sidecar would mismatch the single rendered frame)',
+            );
+          }
+          // When the asset carries a UI Builder recipe, render the
+          // recipe's layer stack instead of the standard placeholder
+          // grid. The recipe's own width/height (if set) overrides
+          // the asset's canvas bounds so a recipe authored at a
+          // different size than the manifest request still ships.
+          const recipe = (asset as any).builder_recipe;
+          const recipeW = recipe.width ?? asset.width;
+          const recipeH = recipe.height ?? asset.height;
+          const handle = backend.createCanvas(recipeW, recipeH);
+          renderBuilderRecipe(
+            { ctx: handle.ctx, width: recipeW, height: recipeH },
+            recipe,
+          );
+          bytes = await handle.encode(formatToMime(asset.format));
         } else {
           const handle = backend.createCanvas(asset.width, asset.height);
           drawAsset(asset, {
