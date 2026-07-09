@@ -9,6 +9,7 @@
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
+    "lint": "tsc --noEmit",
     "test": "vitest run"
   },
   "dependencies": {

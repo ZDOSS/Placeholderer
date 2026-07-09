@@ -105,6 +105,16 @@ importers:
         specifier: ^5.5.0
         version: 5.9.3
 
+  packages/templates:
+    dependencies:
+      '@placeholderer/core':
+        specifier: workspace:*
+        version: link:../core
+    devDependencies:
+      typescript:
+        specifier: ^5.5.0
+        version: 5.9.3
+
 packages:
 
   '@apideck/better-ajv-errors@0.3.7':

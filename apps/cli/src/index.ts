@@ -45,7 +45,7 @@ program
 program
   .command('init-template')
   .description('Write a starter manifest for the given engine and asset type.')
-  .argument('<engine>', `engine name (${'see'} 'list-templates')`)
+  .argument('<engine>', "engine name (see 'list-templates')")
   .argument('<type>', "asset type: image | sprite_sheet | ui_panel | tileset | mixed")
   .option('--out <file>', 'output path (default: ./<engine>_<type>.json)')
   .option('--json', 'emit machine-readable JSON output')

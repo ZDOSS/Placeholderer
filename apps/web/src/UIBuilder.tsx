@@ -1,12 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import {
   type Layer,
-  type RectLayer,
-  type CircleLayer,
-  type LineLayer,
-  type TextLayer,
-  type RasterLayer,
-  type FilledShapeLayer,
   type BlendMode,
 } from '@placeholderer/schemas';
 import { validateBuilderRecipe } from '@placeholderer/core';
@@ -14,6 +8,15 @@ import { colors } from './colors';
 import { renderLayer, exportSVG, preloadRasterImages, rasterCache, type SupportedExportFormat } from './builderRender';
 import { encodeBmp, encodeGif } from '@placeholderer/core';
 import { PRESETS } from './builderPresets';
+import {
+  newLayerId,
+  rectLayer,
+  circleLayer,
+  lineLayer,
+  textLayer,
+  rasterLayer,
+  filledShapeLayer,
+} from './builderLayerFactories';
 
 const STORAGE_KEY = 'placeholderer:builder';
 const HISTORY_LIMIT = 5;
@@ -31,10 +34,6 @@ interface BuilderState {
   snapEnabled: boolean;
 }
 
-function makeId(): string {
-  return Math.random().toString(36).slice(2, 10);
-}
-
 function defaultState(): BuilderState {
   return {
     layers: [
@@ -44,84 +43,6 @@ function defaultState(): BuilderState {
     height: 600,
     gridSize: DEFAULT_GRID,
     snapEnabled: true,
-  };
-}
-
-function rectLayer(opts: Partial<RectLayer> & { name: string; x: number; y: number; width: number; height: number; fill?: string }): RectLayer {
-  return {
-    id: makeId(),
-    type: 'rect',
-    visible: true,
-    locked: false,
-    opacity: 1,
-    blendMode: 'source-over',
-    fill: opts.fill ?? '#4A5568',
-    ...opts,
-  };
-}
-
-function circleLayer(opts: Partial<CircleLayer> & { name: string; x: number; y: number; width: number; height: number; fill?: string }): CircleLayer {
-  return {
-    id: makeId(),
-    type: 'circle',
-    visible: true,
-    locked: false,
-    opacity: 1,
-    blendMode: 'source-over',
-    fill: opts.fill ?? '#4A5568',
-    ...opts,
-  };
-}
-
-function lineLayer(opts: Partial<LineLayer> & { name: string; x: number; y: number; width: number; height: number }): LineLayer {
-  return {
-    id: makeId(),
-    type: 'line',
-    visible: true,
-    locked: false,
-    opacity: 1,
-    blendMode: 'source-over',
-    stroke: { color: '#718096', width: 2 },
-    ...opts,
-  };
-}
-
-function textLayer(opts: Partial<TextLayer> & { name: string; x: number; y: number; width: number; height: number; content: string }): TextLayer {
-  return {
-    id: makeId(),
-    type: 'text',
-    visible: true,
-    locked: false,
-    opacity: 1,
-    blendMode: 'source-over',
-    fill: '#ffffff',
-    text: { content: opts.content, fontSize: 24, fontFamily: 'system-ui, sans-serif', align: 'left' },
-    ...opts,
-  };
-}
-
-function rasterLayer(opts: { name: string; x: number; y: number; width: number; height: number; rasterSrc: string }): RasterLayer {
-  return {
-    id: makeId(),
-    type: 'raster',
-    visible: true,
-    locked: false,
-    opacity: 1,
-    blendMode: 'source-over',
-    ...opts,
-  };
-}
-
-function filledShapeLayer(opts: Partial<FilledShapeLayer> & { name: string; x: number; y: number; width: number; height: number; fill?: string }): FilledShapeLayer {
-  return {
-    id: makeId(),
-    type: 'filled-shape',
-    visible: true,
-    locked: false,
-    opacity: 1,
-    blendMode: 'source-over',
-    fill: opts.fill ?? '#4A5568',
-    ...opts,
   };
 }
 
@@ -334,7 +255,7 @@ export function UIBuilder() {
   const duplicateLayer = (id: string) => {
     const layer = state.layers.find((l) => l.id === id);
     if (!layer) return;
-    const clone: Layer = { ...layer, id: makeId(), name: layer.name + ' copy', x: (layer.x ?? 0) + 16, y: (layer.y ?? 0) + 16 };
+    const clone: Layer = { ...layer, id: newLayerId(), name: layer.name + ' copy', x: (layer.x ?? 0) + 16, y: (layer.y ?? 0) + 16 };
     pushHistory({ ...state, layers: [...state.layers, clone] });
     setSelectedId(clone.id);
   };
@@ -580,7 +501,7 @@ export function UIBuilder() {
     engine: p.engine,
     factory: () => {
       setPresetsOpen(false);
-      const layers: Layer[] = p.layers.map((l) => ({ ...l, id: makeId() }));
+      const layers: Layer[] = p.layers.map((l) => ({ ...l, id: newLayerId() }));
       pushHistory({
         ...state,
         width: p.width,

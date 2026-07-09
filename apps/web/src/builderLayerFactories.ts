@@ -11,8 +11,14 @@ import type {
 } from '@placeholderer/schemas';
 
 let factoryCounter = 1;
-function uid(): string {
+
+/** Fresh unique id for a new or duplicated layer. */
+export function newLayerId(): string {
   return `layer-${factoryCounter++}-${Math.random().toString(36).slice(2, 6)}`;
+}
+
+function uid(): string {
+  return newLayerId();
 }
 
 type Base = Partial<RectLayer> & { name: string; x: number; y: number; width: number; height: number; fill?: string };
