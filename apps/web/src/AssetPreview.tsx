@@ -1,7 +1,8 @@
 import { useEffect, useRef } from 'react';
-import type { Asset } from '@placeholderer/schemas';
+import type { Asset, BuilderRecipe } from '@placeholderer/schemas';
 import {
   drawAsset,
+  renderBuilderRecipe,
   type Canvas2D,
 } from '@placeholderer/core';
 import { colors } from './colors';
@@ -14,9 +15,19 @@ interface Props {
   maxHeight?: number;
 }
 
+/** Read builder_recipe when the asset kind supports it (not sprite_sheet). */
+function recipeFromAsset(asset: Asset): BuilderRecipe | null {
+  if (asset.kind === 'audio' || asset.kind === 'sprite_sheet') return null;
+  const recipe = (asset as { builder_recipe?: BuilderRecipe }).builder_recipe;
+  return recipe ?? null;
+}
+
 /**
- * Live preview that calls the same core draw path as generateJob.
- * Preview and ZIP output stay aligned for image-style assets.
+ * Live preview that mirrors generateJob's draw branches:
+ *   - audio → small tone placeholder
+ *   - builder_recipe (image / tileset / ui_panel) → renderBuilderRecipe
+ *   - otherwise → drawAsset
+ * So overview/detail previews match ZIP output for supported paths.
  */
 export function AssetPreview({ asset, maxWidth = 400, maxHeight = 300 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -48,8 +59,10 @@ export function AssetPreview({ asset, maxWidth = 400, maxHeight = 300 }: Props) 
       return;
     }
 
-    const aw = asset.width ?? 1;
-    const ah = asset.height ?? 1;
+    // Match generateJob: recipe width/height override asset bounds when set.
+    const recipe = recipeFromAsset(asset);
+    const aw = (recipe?.width ?? asset.width) ?? 1;
+    const ah = (recipe?.height ?? asset.height) ?? 1;
 
     // Draw at native size into an offscreen buffer, then scale down
     // for display so labels and grid lines match the real render.
@@ -59,14 +72,19 @@ export function AssetPreview({ asset, maxWidth = 400, maxHeight = 300 }: Props) 
     const offCtx = off.getContext('2d');
     if (!offCtx) return;
 
-    drawAsset(
-      {
-        ctx: offCtx as unknown as Canvas2D,
-        width: aw,
-        height: ah,
-      },
-      asset,
-    );
+    const dc = {
+      ctx: offCtx as unknown as Canvas2D,
+      width: aw,
+      height: ah,
+    };
+
+    if (recipe) {
+      // Same branch as generateJob for image / tileset / ui_panel recipes.
+      // Uses core's solid-fill subset (same fidelity as ZIP generation).
+      renderBuilderRecipe(dc, recipe);
+    } else {
+      drawAsset(dc, asset);
+    }
 
     const scale = Math.min(1, maxWidth / aw, maxHeight / ah);
     canvas.width = Math.max(1, Math.round(aw * scale));
