@@ -22,12 +22,64 @@ function recipeFromAsset(asset: Asset): BuilderRecipe | null {
   return recipe ?? null;
 }
 
+/** Draw a small error tile so a bad recipe never crashes the overview. */
+function paintErrorPreview(
+  canvas: HTMLCanvasElement,
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  message: string,
+): void {
+  const w = Math.max(120, Math.min(width, 280));
+  const h = Math.max(72, Math.min(height, 160));
+  canvas.width = w;
+  canvas.height = h;
+  ctx.fillStyle = '#4A1C1C';
+  ctx.fillRect(0, 0, w, h);
+  ctx.strokeStyle = '#FC8181';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(1, 1, w - 2, h - 2);
+  ctx.fillStyle = '#FED7D7';
+  ctx.font = '12px system-ui, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  // Keep the message short so it fits the tile.
+  const short = message.length > 80 ? message.slice(0, 77) + '…' : message;
+  const lines = wrapText(short, 28);
+  const startY = h / 2 - ((lines.length - 1) * 14) / 2;
+  lines.forEach((line, i) => {
+    ctx.fillText(line, w / 2, startY + i * 14, w - 16);
+  });
+}
+
+function wrapText(text: string, maxChars: number): string[] {
+  const words = text.split(/\s+/);
+  const lines: string[] = [];
+  let cur = '';
+  for (const word of words) {
+    const next = cur ? `${cur} ${word}` : word;
+    if (next.length > maxChars && cur) {
+      lines.push(cur);
+      cur = word;
+    } else {
+      cur = next;
+    }
+  }
+  if (cur) lines.push(cur);
+  return lines.length ? lines.slice(0, 4) : [text];
+}
+
 /**
  * Live preview that mirrors generateJob's draw branches:
  *   - audio → small tone placeholder
  *   - builder_recipe (image / tileset / ui_panel) → renderBuilderRecipe
  *   - otherwise → drawAsset
- * So overview/detail previews match ZIP output for supported paths.
+ *
+ * generateJob catches per-asset render throws and records them in the
+ * report. Preview must do the same: core's recipe renderer throws for
+ * schema-valid but unsupported features (image/pattern fills, rasters).
+ * An uncaught throw here would crash the React effect and break the
+ * whole overview before the user can generate.
  */
 export function AssetPreview({ asset, maxWidth = 400, maxHeight = 300 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -78,12 +130,21 @@ export function AssetPreview({ asset, maxWidth = 400, maxHeight = 300 }: Props) 
       height: ah,
     };
 
-    if (recipe) {
-      // Same branch as generateJob for image / tileset / ui_panel recipes.
-      // Uses core's solid-fill subset (same fidelity as ZIP generation).
-      renderBuilderRecipe(dc, recipe);
-    } else {
-      drawAsset(dc, asset);
+    try {
+      if (recipe) {
+        // Same branch as generateJob for image / tileset / ui_panel recipes.
+        // Uses core's solid-fill subset (same fidelity as ZIP generation).
+        // Throws on image/pattern fills and raster layers — catch below.
+        renderBuilderRecipe(dc, recipe);
+      } else {
+        drawAsset(dc, asset);
+      }
+    } catch (err) {
+      // Mirror generateJob's per-asset error handling: never let a
+      // recipe throw escape the effect and unmount the overview.
+      const message = err instanceof Error ? err.message : String(err);
+      paintErrorPreview(canvas, ctx, maxWidth, maxHeight, message || 'Preview failed');
+      return;
     }
 
     const scale = Math.min(1, maxWidth / aw, maxHeight / ah);
