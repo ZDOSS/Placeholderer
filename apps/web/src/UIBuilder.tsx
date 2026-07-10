@@ -17,6 +17,12 @@ import {
   rasterLayer,
   filledShapeLayer,
 } from './builderLayerFactories';
+import {
+  DRAG_THRESHOLD_PX,
+  applyResizeHandle,
+  getResizeHandle,
+  type ResizeHandle,
+} from './builderResize';
 
 const STORAGE_KEY = 'placeholderer:builder';
 const HISTORY_LIMIT = 5;
@@ -81,7 +87,37 @@ export function UIBuilder() {
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const isInteracting = useRef<{ mode: 'move' | 'resize' | null; resizeHandle?: string; offsetX: number; offsetY: number; startW: number; startH: number; preState: BuilderState | null }>({ mode: null, offsetX: 0, offsetY: 0, startW: 0, startH: 0, preState: null });
+  // Gesture state for move/resize. `didDrag` stays false until the
+  // pointer moves past DRAG_THRESHOLD_PX so a plain shift-click (no
+  // drag) never mutates geometry or pushes undo history.
+  const isInteracting = useRef<{
+    mode: 'move' | 'resize' | null;
+    resizeHandle?: ResizeHandle;
+    offsetX: number;
+    offsetY: number;
+    /** Pointer position at mousedown (canvas coords). */
+    startMx: number;
+    startMy: number;
+    /** Layer geometry at mousedown — resize is always computed from this. */
+    originX: number;
+    originY: number;
+    originW: number;
+    originH: number;
+    preState: BuilderState | null;
+    didDrag: boolean;
+  }>({
+    mode: null,
+    offsetX: 0,
+    offsetY: 0,
+    startMx: 0,
+    startMy: 0,
+    originX: 0,
+    originY: 0,
+    originW: 0,
+    originH: 0,
+    preState: null,
+    didDrag: false,
+  });
 
   // Persist on every state change
   useEffect(() => { saveToStorage(state); }, [state]);
@@ -405,6 +441,22 @@ export function UIBuilder() {
     return { x: e.clientX - rect.left, y: e.clientY - rect.top };
   };
 
+  const clearInteraction = () => {
+    isInteracting.current = {
+      mode: null,
+      offsetX: 0,
+      offsetY: 0,
+      startMx: 0,
+      startMy: 0,
+      originX: 0,
+      originY: 0,
+      originW: 0,
+      originH: 0,
+      preState: null,
+      didDrag: false,
+    };
+  };
+
   const handleMouseDown = (e: React.MouseEvent) => {
     const { x: mx, y: my } = getMouse(e);
     if (e.shiftKey && selectedId) {
@@ -412,7 +464,20 @@ export function UIBuilder() {
       if (sel) {
         const handle = getResizeHandle(sel, mx, my);
         if (handle) {
-          isInteracting.current = { mode: 'resize', resizeHandle: handle, offsetX: 0, offsetY: 0, startW: sel.width ?? 0, startH: sel.height ?? 0, preState: state };
+          isInteracting.current = {
+            mode: 'resize',
+            resizeHandle: handle,
+            offsetX: 0,
+            offsetY: 0,
+            startMx: mx,
+            startMy: my,
+            originX: sel.x ?? 0,
+            originY: sel.y ?? 0,
+            originW: sel.width ?? 0,
+            originH: sel.height ?? 0,
+            preState: state,
+            didDrag: false,
+          };
           return;
         }
       }
@@ -428,15 +493,29 @@ export function UIBuilder() {
       mode: 'move',
       offsetX: mx - (hit.x ?? 0),
       offsetY: my - (hit.y ?? 0),
-      startW: hit.width ?? 0,
-      startH: hit.height ?? 0,
+      startMx: mx,
+      startMy: my,
+      originX: hit.x ?? 0,
+      originY: hit.y ?? 0,
+      originW: hit.width ?? 0,
+      originH: hit.height ?? 0,
       preState: state,
+      didDrag: false,
     };
   };
 
   const handleMouseMove = (e: React.MouseEvent) => {
     const { x: mx, y: my } = getMouse(e);
     const interact = isInteracting.current;
+    if (!interact.mode) return;
+
+    // Ignore micro-jitter / shift-click without a real drag so we
+    // don't collapse a layer to the min size or nudge it by snap.
+    if (!interact.didDrag) {
+      const dist = Math.hypot(mx - interact.startMx, my - interact.startMy);
+      if (dist < DRAG_THRESHOLD_PX) return;
+      interact.didDrag = true;
+    }
 
     if (interact.mode === 'move' && selectedId) {
       const newX = snap(mx - interact.offsetX);
@@ -448,26 +527,16 @@ export function UIBuilder() {
       return;
     }
     if (interact.mode === 'resize' && selectedId && interact.resizeHandle) {
-      const sel = state.layers.find((l) => l.id === selectedId);
-      if (!sel) return;
-      let { x, y, width, height } = { x: sel.x ?? 0, y: sel.y ?? 0, width: sel.width ?? 0, height: sel.height ?? 0 };
-      const handle = interact.resizeHandle;
-      if (handle === 'left' || handle === 'corner') {
-        const newRight = x + width;
-        x = Math.min(snap(mx), newRight - 8);
-        width = newRight - x;
-      }
-      if (handle === 'right' || handle === 'corner') {
-        width = Math.max(8, snap(mx) - x);
-      }
-      if (handle === 'top' || handle === 'corner') {
-        const newBottom = y + height;
-        y = Math.min(snap(my), newBottom - 8);
-        height = newBottom - y;
-      }
-      if (handle === 'bottom' || handle === 'corner') {
-        height = Math.max(8, snap(my) - y);
-      }
+      const { x, y, width, height } = applyResizeHandle(
+        interact.resizeHandle,
+        interact.originX,
+        interact.originY,
+        interact.originW,
+        interact.originH,
+        mx,
+        my,
+        snap,
+      );
       setState((s) => ({
         ...s,
         layers: s.layers.map((l) => l.id === selectedId ? ({ ...l, x, y, width, height } as Layer) : l),
@@ -476,7 +545,9 @@ export function UIBuilder() {
   };
 
   const handleMouseUp = () => {
-    if (isInteracting.current.mode && isInteracting.current.preState) {
+    // Only commit undo history when the pointer actually dragged.
+    // A bare shift-click (or click) must leave the layer and history alone.
+    if (isInteracting.current.mode && isInteracting.current.preState && isInteracting.current.didDrag) {
       // Snapshot the PRE-gesture state into history so undo actually
       // restores the position the user started from, not the post-drag
       // position (which is what 'state' holds by now).
@@ -487,7 +558,7 @@ export function UIBuilder() {
       });
       setFuture([]);
     }
-    isInteracting.current = { mode: null, offsetX: 0, offsetY: 0, startW: 0, startH: 0, preState: null };
+    clearInteraction();
   };
 
   const selectedLayer = state.layers.find((l) => l.id === selectedId) ?? null;
@@ -688,21 +759,6 @@ export function UIBuilder() {
       </div>
     </div>
   );
-}
-
-function getResizeHandle(layer: Layer, mx: number, my: number): string | null {
-  const x = layer.x ?? 0, y = layer.y ?? 0, w = layer.width ?? 0, h = layer.height ?? 0;
-  const T = 8;
-  const nearLeft = Math.abs(mx - x) < T;
-  const nearRight = Math.abs(mx - (x + w)) < T;
-  const nearTop = Math.abs(my - y) < T;
-  const nearBottom = Math.abs(my - (y + h)) < T;
-  if ((nearLeft || nearRight) && (nearTop || nearBottom)) return 'corner';
-  if (nearLeft) return 'left';
-  if (nearRight) return 'right';
-  if (nearTop) return 'top';
-  if (nearBottom) return 'bottom';
-  return null;
 }
 
 function download(blob: Blob, filename: string): void {
