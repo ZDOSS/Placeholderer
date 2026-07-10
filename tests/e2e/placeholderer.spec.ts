@@ -26,10 +26,9 @@ test.describe('Placeholderer web app', () => {
     await page.goto('/');
     await page.getByRole('heading', { name: 'Import Manifest' }).waitFor();
 
-    // Paste a manifest into the textarea. The handler fires when the
-    // text length exceeds 20 chars.
     const textarea = page.locator('textarea[placeholder^="Paste your JSON"]');
     await textarea.fill(STARTER_MANIFEST);
+    await page.getByRole('button', { name: 'Import JSON' }).click();
 
     // The Overview view should now be visible.
     await page.getByRole('heading', { name: /Job Overview/ }).waitFor();
@@ -84,6 +83,7 @@ test.describe('Placeholderer web app', () => {
 
     // First manifest → generate → report appears.
     await textarea.fill(STARTER_MANIFEST);
+    await page.getByRole('button', { name: 'Import JSON' }).click();
     await page.getByRole('heading', { name: /Job Overview/ }).waitFor();
     await page.getByRole('button', { name: /Generate & Download ZIP/ }).click();
     await downloadPromise;
@@ -109,6 +109,7 @@ test.describe('Placeholderer web app', () => {
       }],
     });
     await textarea.fill(otherManifest);
+    await page.getByRole('button', { name: 'Import JSON' }).click();
 
     // Overview for the new job appears.
     await page.getByRole('heading', { name: /Job Overview/ }).waitFor();
@@ -149,5 +150,17 @@ test.describe('Placeholderer web app', () => {
     // Click outside to dismiss.
     await page.locator('h2', { hasText: 'UI Builder' }).click();
     await expect(dialog).toHaveCount(0);
+  });
+
+  test('AI-driven mode shows Copy AI prompt on Templates', async ({ page }) => {
+    await page.goto('/');
+    await page.getByRole('heading', { name: 'Import Manifest' }).waitFor();
+
+    // Enable AI-driven mode (persisted preference).
+    await page.getByLabel('AI-driven mode').check();
+    await page.getByRole('button', { name: 'Templates' }).click();
+    await page.getByRole('heading', { name: 'Templates' }).waitFor();
+    await expect(page.getByRole('button', { name: 'Copy AI prompt' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Copy JSON' })).toBeVisible();
   });
 });

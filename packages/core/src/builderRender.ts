@@ -1,22 +1,24 @@
-// Core-side UI Builder recipe renderer.
+// Core-side UI Builder recipe renderer (CLI + shared generateJob path).
 //
-// The web app's `apps/web/src/builderRender.ts` has the full
-// renderer — patterns, image preloads, glow/shadow, SVG export.
-// That's all browser-only. For the CLI generateJob path we need
-// a stripped-down renderer that can draw a builder recipe onto a
-// node-canvas backend without pulling in browser globals.
+// ⚠️  DUAL-RENDERER LIMITATION (intentional, not a bug)
 //
-// Trade-offs:
-//   - No image-fill preload. Image fills degrade to the fallback
-//     color. A node-canvas with full Image support could lift this.
-//   - No pattern fills (no OffscreenCanvas in Node). Degrades to
-//     the fallback color too.
-//   - Glow is approximated as a blurred drop shadow (node-canvas
-//     supports `shadowBlur`); the web path uses an explicit
-//     `feDropShadow` filter for SVG fidelity.
-//   - All other layer types (rect, circle, line, text, filled-shape,
-//     raster) render correctly with solid fills + strokes +
-//     opacity + rotation + effects.
+// The web UI Builder (`apps/web/src/builderRender.ts`) is the full
+// browser renderer: pattern fills, image preloads, SVG export,
+// glow/shadow filters. This core module is a solid-fill subset that
+// can run under Node via @napi-rs/canvas without browser globals.
+//
+// Manifest assets with an embedded `builder_recipe` therefore render
+// with reduced fidelity when generated through CLI / generateJob:
+//
+//   - Image fills → solid fallback color
+//   - Pattern fills (checkerboard/stripes/diagonal) → solid fallback
+//   - Raster layers without a preloaded bitmap → skipped/empty
+//   - Glow is approximated as a blurred drop shadow (shadowBlur)
+//
+// Solid fills, strokes, text, opacity, blend modes, rotation, and
+// shadow still match. Prefer exporting images from the web UI Builder
+// when image/pattern fidelity matters; use the recipe in manifests
+// for solid-color placeholder UI only.
 //
 // If a layer's render throws (e.g. malformed data), we catch and
 // skip it so one bad layer doesn't kill the whole asset.

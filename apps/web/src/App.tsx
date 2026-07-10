@@ -1,6 +1,16 @@
-import { useState } from 'react';
-import { validateManifest, generateJob, encodeBmp, encodeGif, type CanvasBackend, type Canvas2D, type GenerationReport } from '@placeholderer/core';
-import type { Manifest, Asset, SafeAdjustment } from '@placeholderer/schemas';
+import { useState, useRef, useCallback, useEffect } from 'react';
+import {
+  validateManifest,
+  generateJob,
+  encodeBmp,
+  encodeGif,
+  parseCsvToManifest,
+  type CanvasBackend,
+  type Canvas2D,
+  type GenerationReport,
+  type CsvAssetKind,
+} from '@placeholderer/core';
+import type { Manifest, Asset, SafeAdjustment, NumberingStyle, LabelPosition } from '@placeholderer/schemas';
 import { AssetPreview } from './AssetPreview';
 import { UIBuilder } from './UIBuilder';
 import { Templates } from './Templates';
@@ -38,6 +48,16 @@ const webCanvasBackend: CanvasBackend = {
 
 type View = 'home' | 'overview' | 'detail' | 'builder' | 'templates';
 
+const AI_MODE_KEY = 'placeholderer:ai-mode';
+
+function readAiMode(): boolean {
+  try {
+    return window.localStorage.getItem(AI_MODE_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
 function App() {
   const [view, setView] = useState<View>('home');
   const [job, setJob] = useState<Manifest | null>(null);
@@ -45,25 +65,41 @@ function App() {
   const [error, setError] = useState<string | null>(null);
   const [expandedRequests, setExpandedRequests] = useState<Set<number>>(new Set());
   const [isGenerating, setIsGenerating] = useState(false);
+  const [genProgress, setGenProgress] = useState<{ index: number; total: number; name: string } | null>(null);
   const [importMode, setImportMode] = useState<'json' | 'csv'>('json');
-  const [lastReport, setLastReport] = useState<any>(null);
+  const [jsonText, setJsonText] = useState('');
+  const [lastReport, setLastReport] = useState<{ success: boolean; errors?: string[]; cancelled?: boolean } | null>(null);
   const [manifestReport, setManifestReport] = useState<GenerationReport | null>(null);
+  const [aiMode, setAiMode] = useState(readAiMode);
+  const [dragOver, setDragOver] = useState(false);
   const { theme, toggle: toggleTheme } = useTheme();
+  const abortRef = useRef<AbortController | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const handlePaste = (text: string) => {
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(AI_MODE_KEY, aiMode ? '1' : '0');
+    } catch {
+      // ignore
+    }
+  }, [aiMode]);
+
+  const acceptManifest = useCallback((parsed: Manifest) => {
+    setManifestReport(null);
+    setLastReport(null);
+    setJob(parsed);
+    setView('overview');
+    setError(null);
+    setExpandedRequests(new Set([0]));
+  }, []);
+
+  const handleJsonImport = (text: string) => {
     try {
       const parsed = JSON.parse(text);
       const result = validateManifest(parsed);
 
       if (result.valid) {
-        // Clear any report from the previous job so the user
-        // doesn't see stale folders/files alongside the new
-        // manifest's overview.
-        setManifestReport(null);
-        setJob(parsed as Manifest);
-        setView('overview');
-        setError(null);
-        setExpandedRequests(new Set());
+        acceptManifest(parsed as Manifest);
       } else {
         setError(JSON.stringify(result.errors, null, 2));
       }
@@ -72,10 +108,61 @@ function App() {
     }
   };
 
-  const handleCSVImport = (data: any) => {
-    setManifestReport(null);
-    setJob(data);
-    setView('overview');
+  const handleCSVImport = (data: Manifest) => {
+    setError(null);
+    acceptManifest(data);
+  };
+
+  const importFileText = async (file: File) => {
+    const text = await file.text();
+    const name = file.name.toLowerCase();
+    if (name.endsWith('.csv') || importMode === 'csv') {
+      setImportMode('csv');
+      // Default kind for dropped CSV is image; CSVImport will re-validate
+      // when the user clicks Import, but auto-import drop with kind=image.
+      const parsed = parseCsvToManifest(text, 'image' as CsvAssetKind);
+      if (!parsed.ok) {
+        setError(parsed.error + ' — open CSV mode, pick the correct type, and paste the file contents.');
+        setJsonText('');
+        return;
+      }
+      const result = validateManifest(parsed.manifest);
+      if (!result.valid) {
+        setError(
+          'CSV failed validation (kind may be wrong). Switch to CSV, choose the asset type, paste the file, and Import.\n' +
+          JSON.stringify(result.errors, null, 2)
+        );
+        return;
+      }
+      acceptManifest(parsed.manifest);
+      return;
+    }
+    setImportMode('json');
+    setJsonText(text);
+    handleJsonImport(text);
+  };
+
+  const onFileInput = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      await importFileText(file);
+    } catch (err: any) {
+      setError(err?.message ?? String(err));
+    }
+    e.target.value = '';
+  };
+
+  const onDrop = async (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOver(false);
+    const file = e.dataTransfer.files?.[0];
+    if (!file) return;
+    try {
+      await importFileText(file);
+    } catch (err: any) {
+      setError(err?.message ?? String(err));
+    }
   };
 
   const toggleRequest = (index: number) => {
@@ -116,12 +203,19 @@ function App() {
   const handleGenerate = async () => {
     if (!job) return;
     setIsGenerating(true);
+    setGenProgress(null);
+    setError(null);
     // Drop any report from a previous successful generation so the
     // user can't see stale folders/files when the new generation
     // fails or produces a different job.
     setManifestReport(null);
+    const controller = new AbortController();
+    abortRef.current = controller;
     try {
-      const result = await generateJob(job, webCanvasBackend);
+      const result = await generateJob(job, webCanvasBackend, {
+        signal: controller.signal,
+        onProgress: (p) => setGenProgress(p),
+      });
       setLastReport(result);
 
       if (result.success && result.zip) {
@@ -148,6 +242,9 @@ function App() {
         } catch {
           // Manifest is best-effort.
         }
+      } else if (result.zip && result.cancelled) {
+        setManifestReport(null);
+        setError('Generation cancelled. Partial ZIP was not downloaded.');
       } else {
         // Surface the new error but also wipe any stale report so
         // the user can't see the previous job's folders/files
@@ -159,7 +256,13 @@ function App() {
       setError(e.message);
     } finally {
       setIsGenerating(false);
+      setGenProgress(null);
+      abortRef.current = null;
     }
+  };
+
+  const handleCancelGenerate = () => {
+    abortRef.current?.abort();
   };
 
   const isBuilderView = view === 'builder';
@@ -185,9 +288,11 @@ function App() {
         padding: '1rem 2rem',
         display: 'flex',
         alignItems: 'center',
-        justifyContent: 'space-between'
+        justifyContent: 'space-between',
+        flexWrap: 'wrap',
+        gap: '0.75rem',
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '2rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '2rem', flexWrap: 'wrap' }}>
           <h1 style={{ margin: 0, fontSize: '1.5rem', fontWeight: 600 }}>Placeholderer</h1>
 
           <div style={{ display: 'flex', gap: '0.5rem' }}>
@@ -197,22 +302,46 @@ function App() {
           </div>
         </div>
 
-        <button
-          onClick={toggleTheme}
-          aria-label="Toggle theme"
-          title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`}
-          style={{
-            padding: '0.4rem 0.8rem',
-            background: colors.bgInset,
-            color: colors.text,
-            border: `1px solid ${colors.border}`,
-            borderRadius: '6px',
-            cursor: 'pointer',
-            fontSize: '0.85rem',
-          }}
-        >
-          {theme === 'dark' ? '☀' : '☾'} {theme === 'dark' ? 'Light' : 'Dark'}
-        </button>
+        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+          <label
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.4rem',
+              fontSize: '0.85rem',
+              color: colors.textMuted,
+              cursor: 'pointer',
+              padding: '0.35rem 0.6rem',
+              borderRadius: '6px',
+              border: `1px solid ${colors.border}`,
+              background: colors.bgInset,
+            }}
+            title="Persist AI-driven mode preference and show prompt copy helpers on Templates"
+          >
+            <input
+              type="checkbox"
+              checked={aiMode}
+              onChange={(e) => setAiMode(e.target.checked)}
+            />
+            AI-driven mode
+          </label>
+          <button
+            onClick={toggleTheme}
+            aria-label="Toggle theme"
+            title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`}
+            style={{
+              padding: '0.4rem 0.8rem',
+              background: colors.bgInset,
+              color: colors.text,
+              border: `1px solid ${colors.border}`,
+              borderRadius: '6px',
+              cursor: 'pointer',
+              fontSize: '0.85rem',
+            }}
+          >
+            {theme === 'dark' ? '☀' : '☾'} {theme === 'dark' ? 'Light' : 'Dark'}
+          </button>
+        </div>
       </div>
 
       <div style={{ maxWidth: contentMaxWidth, margin: '0 auto', padding: contentPadding }}>
@@ -220,7 +349,7 @@ function App() {
         {view === 'home' && (
           <div>
             <div style={{ marginBottom: '1.5rem' }}>
-              <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem' }}>
+              <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem', flexWrap: 'wrap', alignItems: 'center' }}>
                 <button
                   onClick={() => setImportMode('json')}
                   style={{
@@ -247,31 +376,89 @@ function App() {
                 >
                   CSV
                 </button>
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  style={{
+                    padding: '0.5rem 1rem',
+                    background: colors.bgInset,
+                    border: `1px solid ${colors.border}`,
+                    color: colors.text,
+                    borderRadius: '6px',
+                    cursor: 'pointer',
+                    marginLeft: 'auto',
+                  }}
+                >
+                  Upload file…
+                </button>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".json,.csv,application/json,text/csv,text/plain"
+                  style={{ display: 'none' }}
+                  onChange={onFileInput}
+                />
               </div>
 
-              {importMode === 'json' && (
-                <>
-                  <h2 style={{ marginTop: 0 }}>Import Manifest</h2>
-                  <textarea
-                    placeholder="Paste your JSON manifest here..."
-                    style={{
-                      width: '100%',
-                      height: '320px',
-                      background: colors.bgElevated,
-                      color: colors.text,
-                      border: `1px solid ${colors.borderStrong}`,
-                      borderRadius: '8px',
-                      padding: '1rem',
-                      fontFamily: 'monospace',
-                      fontSize: '0.9rem',
-                      resize: 'vertical' as const
-                    }}
-                    onChange={(e) => e.target.value.trim().length > 20 && handlePaste(e.target.value)}
-                  />
-                </>
-              )}
+              <div
+                onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+                onDragLeave={() => setDragOver(false)}
+                onDrop={onDrop}
+                style={{
+                  borderRadius: '8px',
+                  border: dragOver ? `2px dashed ${colors.accent}` : `2px dashed transparent`,
+                  padding: dragOver ? '0.25rem' : 0,
+                }}
+              >
+                {importMode === 'json' && (
+                  <>
+                    <h2 style={{ marginTop: 0 }}>Import Manifest</h2>
+                    <p style={{ color: colors.textMuted, fontSize: '0.9rem' }}>
+                      Paste JSON below, or drag-and-drop a <code>.json</code> file. Import only runs when you click the button
+                      (or drop a file) so partial typing does not spam validation errors.
+                    </p>
+                    <textarea
+                      placeholder="Paste your JSON manifest here..."
+                      value={jsonText}
+                      onChange={(e) => setJsonText(e.target.value)}
+                      style={{
+                        width: '100%',
+                        height: '320px',
+                        background: colors.bgElevated,
+                        color: colors.text,
+                        border: `1px solid ${colors.borderStrong}`,
+                        borderRadius: '8px',
+                        padding: '1rem',
+                        fontFamily: 'monospace',
+                        fontSize: '0.9rem',
+                        resize: 'vertical' as const
+                      }}
+                    />
+                    <button
+                      onClick={() => handleJsonImport(jsonText)}
+                      disabled={!jsonText.trim()}
+                      style={{
+                        marginTop: '1rem',
+                        padding: '0.6rem 1.5rem',
+                        background: colors.accent,
+                        color: '#fff',
+                        border: 'none',
+                        borderRadius: '6px',
+                        cursor: jsonText.trim() ? 'pointer' : 'not-allowed',
+                        opacity: jsonText.trim() ? 1 : 0.6,
+                      }}
+                    >
+                      Import JSON
+                    </button>
+                  </>
+                )}
 
-              {importMode === 'csv' && <CSVImport onImport={handleCSVImport} />}
+                {importMode === 'csv' && (
+                  <CSVImport
+                    onImport={handleCSVImport}
+                    onError={(msg) => setError(msg)}
+                  />
+                )}
+              </div>
             </div>
 
             {error && (
@@ -294,88 +481,183 @@ function App() {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
               <h2 style={{ margin: 0 }}>Job Overview — {job.job?.name || 'Unnamed Job'}</h2>
               <button
-                onClick={() => { setView('home'); setJob(null); setLastReport(null); setManifestReport(null); }}
+                onClick={() => {
+                  setView('home');
+                  setJob(null);
+                  setLastReport(null);
+                  setManifestReport(null);
+                  setError(null);
+                }}
                 style={{ padding: '0.5rem 1rem', background: colors.bgInset, color: colors.text, border: 'none', borderRadius: '6px' }}
               >
                 New Job
               </button>
             </div>
 
-            {job.requests.map((request, rIndex) => (
-              <div key={rIndex} style={{
-                background: colors.bgElevated,
-                border: `1px solid ${colors.border}`,
-                borderRadius: '8px',
-                marginBottom: '1rem',
-                overflow: 'hidden'
-              }}>
-                <div
-                  onClick={() => toggleRequest(rIndex)}
+            {job.requests.map((request, rIndex) => {
+              const kinds = [...new Set(request.assets.map((a) => a.kind))];
+              const previewAssets = request.assets.slice(0, 3);
+              return (
+                <div key={rIndex} style={{
+                  background: colors.bgElevated,
+                  border: `1px solid ${colors.border}`,
+                  borderRadius: '8px',
+                  marginBottom: '1rem',
+                  overflow: 'hidden'
+                }}>
+                  <div
+                    onClick={() => toggleRequest(rIndex)}
+                    style={{
+                      padding: '1rem 1.25rem',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      background: colors.bgInset
+                    }}
+                  >
+                    <div>
+                      <strong>{request.name || `Request ${rIndex + 1}`}</strong>
+                      <span style={{ color: colors.textMuted, marginLeft: '1rem' }}>
+                        {request.assets.length} assets
+                        {kinds.length > 0 && ` · ${kinds.join(', ')}`}
+                      </span>
+                    </div>
+                    <span style={{ color: colors.textDim }}>{expandedRequests.has(rIndex) ? '−' : '+'}</span>
+                  </div>
+
+                  {/* Preview strip — 2–3 representative assets */}
+                  {previewAssets.length > 0 && (
+                    <div style={{
+                      display: 'flex',
+                      gap: '0.75rem',
+                      padding: '0.75rem 1.25rem',
+                      borderBottom: expandedRequests.has(rIndex) ? `1px solid ${colors.border}` : 'none',
+                      overflowX: 'auto',
+                    }}>
+                      {previewAssets.map((asset, i) => (
+                        <div
+                          key={i}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openAssetDetail(rIndex, i);
+                          }}
+                          style={{
+                            cursor: 'pointer',
+                            flex: '0 0 auto',
+                            textAlign: 'center',
+                          }}
+                          title={asset.name}
+                        >
+                          <AssetPreview asset={asset} maxWidth={96} maxHeight={72} />
+                          <div style={{ fontSize: '0.7rem', color: colors.textMuted, marginTop: '0.25rem', maxWidth: 96, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {asset.name}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {expandedRequests.has(rIndex) && (
+                    <div style={{ padding: '0 1.25rem 1.25rem' }}>
+                      {request.assets.map((asset, aIndex) => (
+                        <div
+                          key={aIndex}
+                          onClick={() => openAssetDetail(rIndex, aIndex)}
+                          style={{
+                            padding: '0.875rem 1rem',
+                            background: colors.bgInset,
+                            marginTop: '0.5rem',
+                            borderRadius: '6px',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center'
+                          }}
+                        >
+                          <div>
+                            <strong>{asset.name}</strong>
+                            <span style={{ color: colors.textMuted, marginLeft: '0.75rem' }}>
+                              {asset.kind} • {describeAssetSize(asset)}
+                            </span>
+                          </div>
+                          <div style={{ color: colors.textDim, fontSize: '0.85rem' }}>{asset.output_path}</div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+
+            <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', marginTop: '1.5rem', flexWrap: 'wrap' }}>
+              <button
+                onClick={handleGenerate}
+                disabled={isGenerating}
+                style={{
+                  padding: '0.75rem 2.5rem',
+                  background: colors.accent,
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: '8px',
+                  fontSize: '1rem',
+                  cursor: isGenerating ? 'wait' : 'pointer',
+                  opacity: isGenerating ? 0.85 : 1,
+                }}
+              >
+                {isGenerating ? 'Generating…' : 'Generate & Download ZIP'}
+              </button>
+              {isGenerating && (
+                <button
+                  onClick={handleCancelGenerate}
                   style={{
-                    padding: '1rem 1.25rem',
+                    padding: '0.75rem 1.25rem',
+                    background: colors.bgInset,
+                    color: colors.text,
+                    border: `1px solid ${colors.border}`,
+                    borderRadius: '8px',
                     cursor: 'pointer',
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    background: colors.bgInset
                   }}
                 >
-                  <div>
-                    <strong>{request.name || `Request ${rIndex + 1}`}</strong>
-                    <span style={{ color: colors.textMuted, marginLeft: '1rem' }}>
-                      {request.assets.length} assets
-                    </span>
-                  </div>
-                  <span style={{ color: colors.textDim }}>{expandedRequests.has(rIndex) ? '−' : '+'}</span>
+                  Cancel
+                </button>
+              )}
+            </div>
+
+            {isGenerating && genProgress && (
+              <div style={{ marginTop: '1rem', maxWidth: 480 }}>
+                <div style={{ fontSize: '0.85rem', color: colors.textMuted, marginBottom: '0.35rem' }}>
+                  {genProgress.index + 1} / {genProgress.total} — {genProgress.name}
                 </div>
-
-                {expandedRequests.has(rIndex) && (
-                  <div style={{ padding: '0 1.25rem 1.25rem' }}>
-                    {request.assets.map((asset, aIndex) => (
-                      <div
-                        key={aIndex}
-                        onClick={() => openAssetDetail(rIndex, aIndex)}
-                        style={{
-                          padding: '0.875rem 1rem',
-                          background: colors.bgInset,
-                          marginTop: '0.5rem',
-                          borderRadius: '6px',
-                          cursor: 'pointer',
-                          display: 'flex',
-                          justifyContent: 'space-between',
-                          alignItems: 'center'
-                        }}
-                      >
-                        <div>
-                          <strong>{asset.name}</strong>
-                          <span style={{ color: colors.textMuted, marginLeft: '0.75rem' }}>
-                            {asset.kind} • {describeAssetSize(asset)}
-                          </span>
-                        </div>
-                        <div style={{ color: colors.textDim, fontSize: '0.85rem' }}>{asset.output_path}</div>
-                      </div>
-                    ))}
-                  </div>
-                )}
+                <div style={{
+                  height: 8,
+                  background: colors.bgInset,
+                  borderRadius: 4,
+                  overflow: 'hidden',
+                  border: `1px solid ${colors.border}`,
+                }}>
+                  <div style={{
+                    height: '100%',
+                    width: `${Math.round(((genProgress.index + 1) / Math.max(1, genProgress.total)) * 100)}%`,
+                    background: colors.accent,
+                    transition: 'width 0.15s ease',
+                  }} />
+                </div>
               </div>
-            ))}
+            )}
 
-            <button
-              onClick={handleGenerate}
-              disabled={isGenerating}
-              style={{
-                marginTop: '1.5rem',
-                padding: '0.75rem 2.5rem',
-                background: colors.accent,
-                color: '#fff',
-                border: 'none',
+            {error && view === 'overview' && (
+              <pre style={{
+                marginTop: '1rem',
+                background: colors.errorBg,
+                color: colors.errorText,
+                padding: '1rem',
                 borderRadius: '8px',
-                fontSize: '1rem',
-                cursor: 'pointer'
-              }}
-            >
-              {isGenerating ? 'Generating...' : 'Generate & Download ZIP'}
-            </button>
+                border: `1px solid ${colors.errorBorder}`,
+              }}>
+                {error}
+              </pre>
+            )}
 
             {lastReport && (
               <div style={{
@@ -385,8 +667,14 @@ function App() {
                 border: `1px solid ${lastReport.success ? colors.successBorder : colors.errorBorder}`,
                 borderRadius: '8px'
               }}>
-                <strong>{lastReport.success ? '✓ Generation successful' : '✕ Generation had errors'}</strong>
-                {lastReport.errors?.length > 0 && (
+                <strong>
+                  {lastReport.cancelled
+                    ? 'Generation cancelled'
+                    : lastReport.success
+                      ? '✓ Generation successful'
+                      : '✕ Generation had errors'}
+                </strong>
+                {lastReport.errors && lastReport.errors.length > 0 && (
                   <div style={{ marginTop: '0.75rem', color: colors.errorText }}>
                     {lastReport.errors.join('\n')}
                   </div>
@@ -444,8 +732,8 @@ function App() {
 
         {/* ITEM DETAIL */}
         {view === 'detail' && selectedAsset && (
-          <div style={{ display: 'flex', gap: '3rem' }}>
-            <div style={{ flex: 1 }}>
+          <div style={{ display: 'flex', gap: '3rem', flexWrap: 'wrap' }}>
+            <div style={{ flex: 1, minWidth: 280 }}>
               <button
                 onClick={closeDetail}
                 style={{ marginBottom: '1.5rem', background: 'none', border: 'none', color: colors.textMuted, cursor: 'pointer' }}
@@ -469,7 +757,7 @@ function App() {
                   <label style={{ display: 'block', marginBottom: '0.35rem' }}>Numbering Style</label>
                   <select
                     value={selectedAsset.asset.numbering_style || 'zero-padded'}
-                    onChange={(e) => applySafeAdjustment({ numbering_style: e.target.value as any })}
+                    onChange={(e) => applySafeAdjustment({ numbering_style: e.target.value as NumberingStyle })}
                     style={{ width: '100%', padding: '0.5rem', background: colors.bgElevated, color: colors.text, border: `1px solid ${colors.borderStrong}`, borderRadius: '6px' }}
                   >
                     <option value="zero-padded">Zero-padded (01, 02...)</option>
@@ -482,7 +770,7 @@ function App() {
                   <label style={{ display: 'block', marginBottom: '0.35rem' }}>Label Position</label>
                   <select
                     value={selectedAsset.asset.label_position || 'corners'}
-                    onChange={(e) => applySafeAdjustment({ label_position: e.target.value as any })}
+                    onChange={(e) => applySafeAdjustment({ label_position: e.target.value as LabelPosition })}
                     style={{ width: '100%', padding: '0.5rem', background: colors.bgElevated, color: colors.text, border: `1px solid ${colors.borderStrong}`, borderRadius: '6px' }}
                   >
                     <option value="corners">Corners</option>
@@ -499,13 +787,13 @@ function App() {
                       checked={selectedAsset.asset.panel_guides ?? false}
                       onChange={(e) => applySafeAdjustment({ panel_guides: e.target.checked })}
                     />
-                    Show Panel Guides (preview)
+                    Show Panel Guides
                   </label>
                 )}
               </div>
             </div>
 
-            <div style={{ flex: 1 }}>
+            <div style={{ flex: 1, minWidth: 280 }}>
               <h3>Preview</h3>
               <AssetPreview asset={selectedAsset.asset} />
             </div>
@@ -514,7 +802,7 @@ function App() {
 
         {/* OTHER VIEWS */}
         {view === 'builder' && <UIBuilder />}
-        {view === 'templates' && <Templates />}
+        {view === 'templates' && <Templates aiMode={aiMode} />}
       </div>
     </div>
   );
@@ -535,7 +823,7 @@ function Stat({ label, value }: { label: string; value: string }) {
  *  "undefined×undefined". */
 function describeAssetSize(asset: Asset): string {
   if (asset.kind === 'audio') {
-    const sr = (asset as any).sample_rate ?? 44100;
+    const sr = asset.sample_rate ?? 44100;
     return `${asset.duration}s @ ${sr}Hz`;
   }
   return `${asset.width}×${asset.height}`;

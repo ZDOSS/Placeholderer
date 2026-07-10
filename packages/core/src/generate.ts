@@ -3,18 +3,14 @@ import type {
   Manifest,
   Asset,
   Format,
-  ImageAsset,
   SpriteSheetAsset,
-  TilesetAsset,
   UiPanelAsset,
   AudioAsset,
 } from '@placeholderer/schemas';
 import { sanitizePath, sanitizeFilename } from './path.js';
 import {
-  drawImageAsset,
-  drawSpriteSheetAsset,
-  drawTilesetAsset,
-  drawUiPanelAsset,
+  drawAsset,
+  buildPanelMetadata,
   type DrawContext,
 } from './render.js';
 import type { CanvasBackend } from './canvas.js';
@@ -28,26 +24,27 @@ export interface GenerateResult {
   /** Sanitized filename suggested for the ZIP (job.name with .zip). */
   suggestedName?: string;
   errors: string[];
+  /** True when generation stopped early because the abort signal fired. */
+  cancelled?: boolean;
+}
+
+export interface GenerateProgress {
+  /** 0-based index of the asset currently being processed. */
+  index: number;
+  /** Total assets in the job. */
+  total: number;
+  /** Asset name currently being generated. */
+  name: string;
+}
+
+export interface GenerateOptions {
+  /** Called once per asset before it is generated. */
+  onProgress?: (progress: GenerateProgress) => void;
+  /** When aborted, generation stops and returns a partial ZIP if any. */
+  signal?: AbortSignal;
 }
 
 const REPORT_DIR = '_placeholderer';
-
-function drawAsset(asset: Asset, dc: DrawContext): void {
-  switch (asset.kind) {
-    case 'sprite_sheet':
-      drawSpriteSheetAsset(dc, asset as SpriteSheetAsset);
-      return;
-    case 'tileset':
-      drawTilesetAsset(dc, asset as TilesetAsset);
-      return;
-    case 'ui_panel':
-      drawUiPanelAsset(dc, asset as UiPanelAsset);
-      return;
-    case 'image':
-    default:
-      drawImageAsset(dc, asset as ImageAsset);
-  }
-}
 
 function formatToMime(format: Format): string {
   switch (format) {
@@ -77,9 +74,18 @@ function buildSuggestedName(job: Manifest): string {
   return `${safe || 'placeholders'}.zip`;
 }
 
+function countAssets(job: Manifest): number {
+  let n = 0;
+  for (const request of job.requests ?? []) {
+    n += (request.assets ?? []).length;
+  }
+  return n;
+}
+
 export async function generateJob(
   job: Manifest,
-  backend: CanvasBackend
+  backend: CanvasBackend,
+  options: GenerateOptions = {},
 ): Promise<GenerateResult> {
   const zip = new JSZip();
   const errors: string[] = [];
@@ -87,13 +93,20 @@ export async function generateJob(
   const declaredFolders = new Set<string>();
   let totalAssets = 0;
   let successful = 0;
+  let cancelled = false;
+  const total = countAssets(job);
+  let assetIndex = 0;
 
-  // Sidecar reservations for animated sprite sheets. Tracked
-  // separately from committed files so a sprite sheet can still
-  // be written when only its sidecar path collides with a prior
-  // asset (the primary sheet path is what blocks generation).
+  // Sidecar reservations for animated sprite sheets and panel metadata.
+  // Tracked separately from committed files so a primary asset can still
+  // be written when only its sidecar path collides with a prior asset.
   const reservedSidecars = new Set<string>();
 
+  // Panel metadata sidecars: path → payload, written after the main loop
+  // (same pattern as animation.json).
+  const panelMetadataPending: Array<{ path: string; payload: Record<string, unknown> }> = [];
+
+  outer:
   for (const request of job.requests ?? []) {
     // Collect declared folders so we can materialize empty ones later.
     for (const folder of request.folders ?? []) {
@@ -105,7 +118,20 @@ export async function generateJob(
     }
 
     for (const asset of request.assets ?? []) {
+      if (options.signal?.aborted) {
+        cancelled = true;
+        errors.push('generation cancelled');
+        break outer;
+      }
+
       totalAssets++;
+      options.onProgress?.({
+        index: assetIndex,
+        total,
+        name: asset.name,
+      });
+      assetIndex++;
+
       try {
         const safePath = asset.output_path ? sanitizePath(asset.output_path) : '';
         const safeName = sanitizeFilename(asset.name);
@@ -124,6 +150,13 @@ export async function generateJob(
         if (asset.kind === 'sprite_sheet' && (asset as SpriteSheetAsset).frame_duration_ms != null) {
           const sidecarFile = `${safeName}.animation.json`;
           sidecarPath = safePath ? `${safePath}/${sidecarFile}` : sidecarFile;
+        }
+
+        // UI panel metadata sidecar when export_panel_metadata is set.
+        let panelMetaPath: string | null = null;
+        if (asset.kind === 'ui_panel' && (asset as UiPanelAsset).export_panel_metadata) {
+          const metaFile = `${safeName}.panel.json`;
+          panelMetaPath = safePath ? `${safePath}/${metaFile}` : metaFile;
         }
 
         // Duplicate check: only the primary output path can block
@@ -156,6 +189,10 @@ export async function generateJob(
           // grid. The recipe's own width/height (if set) overrides
           // the asset's canvas bounds so a recipe authored at a
           // different size than the manifest request still ships.
+          //
+          // NOTE: core's recipe renderer is a solid-fill subset of the
+          // web UI Builder renderer. Image/pattern fills degrade to a
+          // solid color. See packages/core/src/builderRender.ts.
           const recipe = (asset as any).builder_recipe;
           const recipeW = recipe.width ?? asset.width;
           const recipeH = recipe.height ?? asset.height;
@@ -166,12 +203,13 @@ export async function generateJob(
           );
           bytes = await handle.encode(formatToMime(asset.format));
         } else {
-          const handle = backend.createCanvas(asset.width, asset.height);
-          drawAsset(asset, {
+          const handle = backend.createCanvas(asset.width!, asset.height!);
+          const dc: DrawContext = {
             ctx: handle.ctx,
-            width: asset.width,
-            height: asset.height,
-          });
+            width: asset.width!,
+            height: asset.height!,
+          };
+          drawAsset(dc, asset);
           bytes = await handle.encode(formatToMime(asset.format));
         }
         // Commit the file to the ZIP, then to the report — only after
@@ -185,6 +223,13 @@ export async function generateJob(
         // in createdFiles and leave it alone.
         if (sidecarPath && !createdFiles.includes(sidecarPath)) {
           reservedSidecars.add(sidecarPath);
+        }
+        if (panelMetaPath && !createdFiles.includes(panelMetaPath)) {
+          reservedSidecars.add(panelMetaPath);
+          panelMetadataPending.push({
+            path: panelMetaPath,
+            payload: buildPanelMetadata(asset as UiPanelAsset),
+          });
         }
         successful++;
       } catch (err: any) {
@@ -275,6 +320,14 @@ export async function generateJob(
     }
   }
 
+  // UI panel metadata sidecars.
+  for (const pending of panelMetadataPending) {
+    if (createdFiles.includes(pending.path)) continue;
+    if (!reservedSidecars.has(pending.path)) continue;
+    zip.file(pending.path, JSON.stringify(pending.payload, null, 2));
+    createdFiles.push(pending.path);
+  }
+
   // Always emit a manifest report, even on partial failure, so the
   // caller can see what landed and what didn't.
   const report: GenerationReport = buildReport({
@@ -301,10 +354,11 @@ export async function generateJob(
 
   const zipBytes = await zip.generateAsync({ type: 'uint8array' });
   return {
-    success: errors.length === 0,
+    success: errors.length === 0 && !cancelled,
     zip: zipBytes,
     suggestedName: buildSuggestedName(job),
     errors,
+    cancelled,
   };
 }
 
